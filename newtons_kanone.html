@@ -258,6 +258,23 @@ const fmtKm = m => (m / KM).toLocaleString("de-CH", { maximumFractionDigits: 0 }
 
 // Zusätzlicher Zeitraffer für alle Level (1 = ursprüngliche Geschwindigkeit)
 const SPEEDUP = 3;
+const timeFactor = L => L.timeScale * (L.speedup ?? SPEEDUP);
+
+/* Positionen in gleichen Zeitabständen dt (für die Punkte auf der Bahn) */
+function timeDots(v0, dt){
+  const thEnd = thetaMax(v0), pts = [];
+  let th = 0, n = 0;
+  const sub = dt / 200;
+  pts.push(toXY(0, R_LAUNCH));
+  while (th < thEnd && n < 400){
+    for (let i = 0; i < 200 && th < thEnd; i++) th = thetaStep(th, v0, sub);
+    if (th >= thEnd) break;
+    const r = rOfTheta(th, v0);
+    if (!isFinite(r) || r > 40 * R_EARTH) break;
+    pts.push(toXY(th, r)); n++;
+  }
+  return pts;
+}
 
 const LEVELS = [
   {
@@ -296,7 +313,8 @@ const LEVELS = [
     type: "ring-apogee", targetR: R_EARTH + 2000 * KM, tol: 300 * KM,
     vmin: 7.79, vmax: 10, step: 0.01, correct: 8244.3,
     view: { cx: 0, cy: -900 * KM, w: 2.85 * R_EARTH },
-    timeScale: 1800,
+    timeScale: 1000, speedup: 1,   // langsamer als die anderen Level: ein Umlauf dauert etwa 6 s
+    timeDots: 300,                 // nach dem Schuss: Position alle 300 s (5 min) als Punkte
     given: [["GM der Erde", "3.986 · 10¹⁴ m³/s²"], ["Abschuss = Perigäum", "r_P = r₀ = 6571 km"], ["Ziel = Apogäum", "r_A = 6371 km + 2000 km = 8371 km"]],
     wanted: "v₀, damit die Ellipse genau bis r_A reicht",
     tips: ["Zwei Erhaltungssätze: Energie und Drehimpuls. Im Perigäum und im Apogäum steht v senkrecht auf r. Die grosse Halbachse ist a = (r_P + r_A) / 2.",
@@ -418,6 +436,19 @@ function drawScene(c, g, level, opts = {}){
 
   // frühere Bahnen (grau)
   (opts.ghosts || []).forEach(sh => drawPath(g, V, sh.pts, "#a9a39a", 1.5 * f, sh.v, c));
+  // Punkte in gleichen Zeitabständen (Level 3): dicht = langsam, weit auseinander = schnell
+  let anyDots = false;
+  (opts.ghosts || []).forEach(sh => {
+    if (!sh.dots) return;
+    anyDots = true;
+    const last = sh === opts.lastShot;
+    g.fillStyle = last ? "#b5452f" : "#a9a39a";
+    sh.dots.forEach(p => { const [X, Y] = V.px(...p); g.beginPath(); g.arc(X, Y, (last ? 4.5 : 2.8) * f, 0, 2 * Math.PI); g.fill(); });
+  });
+  if (anyDots && !opts.noLabels){
+    g.beginPath(); g.arc(18 * f, c.height - 22 * f, 4.5 * f, 0, 2 * Math.PI); g.fillStyle = "#b5452f"; g.fill();
+    label(g, c, `Position der Kugel alle ${Math.round(level.timeDots / 60)} Minuten`, 30 * f, c.height - 22 * f, "#4a4640", "left");
+  }
   // aktuelle Bahn
   if (opts.trail && opts.trail.length){
     drawPath(g, V, opts.trail, "#b5452f", 3 * f);
@@ -528,7 +559,7 @@ function setupLevel(){
   $("history").innerHTML = "";
   setFeedback("Rechne zuerst und mach dann deine Vorhersage.");
   $("viewInfo").textContent = `Bildbreite ${fmtKm(L.view.w)}`;
-  $("timeInfo").textContent = `Zeitraffer ×${L.timeScale * SPEEDUP}`;
+  $("timeInfo").textContent = `Zeitraffer ×${timeFactor(L)}`;
   redraw();
 }
 
@@ -609,7 +640,7 @@ function tick(ts){
   if (!a) return;
   if (a.last === null) a.last = ts;
   const realDt = Math.min(0.05, (ts - a.last) / 1000); a.last = ts;
-  const simDt = realDt * L.timeScale * SPEEDUP, nSub = 60, sub = simDt / nSub;
+  const simDt = realDt * timeFactor(L), nSub = 60, sub = simDt / nSub;
   for (let i = 0; i < nSub && a.theta < a.thEnd; i++) a.theta = Math.min(a.thEnd, thetaStep(a.theta, a.v0, sub));
   const r = rOfTheta(a.theta, a.v0);
   a.trail.push(toXY(a.theta, r));
@@ -635,6 +666,7 @@ function finishShot(){
   state.anim = null;
   const v0 = a.v0, out = outcome(v0);
   const shot = { v: v0, out, pts: samplePath(v0) };
+  if (L.timeDots) shot.dots = timeDots(v0, L.timeDots);
   const verdict = judge(L, shot);
   shot.verdict = verdict;
   state.shots.push(shot);
@@ -647,7 +679,7 @@ function finishShot(){
   setFeedback(`<b>${verdict.title}</b> ${verdict.text}${predTxt}`, verdict.hit ? "ok" : verdict.good === false ? "bad" : "");
   state.prediction = null;
   $("predictBox").querySelectorAll("button").forEach(x => x.classList.remove("sel"));
-  drawScene(cv, ctx, L, { ghosts: state.shots, axisFor: v0 });
+  drawScene(cv, ctx, L, { ghosts: state.shots, axisFor: v0, lastShot: shot });
 
   const levelOver = verdict.hit || state.shots.length >= SHOTS_PER_LEVEL;
   if (levelOver) state.endTimer = setTimeout(() => { state.endTimer = null; endLevel(); }, 900);
@@ -756,7 +788,7 @@ $("nextBtn").onclick = () => {
 
 function redraw(){
   if (state.finished) return;
-  drawScene(cv, ctx, level(), { ghosts: state.shots });
+  drawScene(cv, ctx, level(), { ghosts: state.shots, lastShot: state.shots[state.shots.length - 1] });
 }
 
 /* ============================================================

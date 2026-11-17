@@ -67,6 +67,53 @@
   .chatform{display:flex;gap:8px;align-items:flex-end}
   .chatform textarea{flex:1;min-width:0;font:inherit;font-size:15px;border:1.5px solid var(--line);border-radius:8px;padding:8px 10px;resize:vertical;min-height:44px;background:#fff;color:var(--ink)}
   .orbitmsg{font-size:13px;color:var(--accent);font-weight:600;margin:8px 0 0;min-height:1em}
+  .tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px}
+  button.tab{font-size:13px;padding:7px 10px}
+  .pane{min-height:0}
+  .plotwrap{height:230px}
+  #lplot{width:100%;height:100%;display:block;background:#fbfaf7;border:1px solid var(--line);border-radius:8px}
+  #embedWrap{display:flex;flex-direction:column}
+  #tutorFrame{width:100%;height:620px;border:1px solid var(--line);border-radius:8px;background:#fff;margin-top:8px}
+  .headnote{display:none}
+
+  /* Bildschirmfüllend ohne Scrollen (Laptop, Beamer) */
+  @media (min-width:1000px) and (min-height:560px){
+    html,body{height:100%;overflow:hidden}
+    body{display:flex;flex-direction:column}
+    header{padding-top:6px;padding-bottom:6px}
+    footer{display:none}
+    main{flex:1;min-height:0;max-width:none;width:100%;padding-top:8px;padding-bottom:8px;gap:12px;
+         grid-template-columns:auto minmax(330px,1.12fr) minmax(290px,.88fr);grid-template-rows:minmax(0,1fr)}
+    #stage{width:min(40vw, calc(100vh - 70px));aspect-ratio:1/1;align-self:start}
+    main > .card{overflow-y:auto}
+    #ctrl{display:flex;flex-direction:column;padding:10px 14px}
+    #ctrl .step{margin:7px 0 3px}
+    #ctrl .step:first-child{margin-top:0}
+    .row{margin:1px 0}
+    #toggles{flex-direction:row;flex-wrap:wrap;gap:2px 12px;font-size:13.5px}
+    #ctrl .presets button{font-size:13px;padding:5px 8px}
+    #ctrl .presets{gap:5px}
+    .row{grid-template-columns:minmax(0,1.15fr) minmax(70px,1fr) 62px;gap:8px;font-size:13.5px;line-height:1.2}
+    .law p{font-size:13.5px;line-height:1.35}
+    .law .data{font-size:13.5px}
+    .controls{margin-top:4px}
+    button{padding:7px 11px}
+    .orbitmsg{margin:4px 0 0}
+    .orbitmsg:empty{display:none}
+    .law{padding:7px 10px}
+    .law .note{font-size:12.5px;line-height:1.35}
+    .law .data{gap:0 12px}
+    .lawf{font-size:17px}
+    .plotwrap{height:clamp(130px, 30vh, 330px);flex:none}
+    #side .step{margin:8px 0 4px}
+    #side .note{margin:4px 0 0}
+    .chatcard{grid-column:auto;display:flex;flex-direction:column;padding:10px 14px}
+    .pane:not([hidden]){flex:1;display:flex;flex-direction:column}
+    #paneTutor .chatlog{flex:1;max-height:none;min-height:80px}
+    #paneData .tablewrap{flex:1;max-height:none;min-height:80px}
+    #embedWrap:not([hidden]){flex:1;min-height:0}
+    #tutorFrame{flex:1;height:auto;min-height:200px}
+  }
   footer{max-width:1320px;margin:0 auto;padding:4px max(16px, env(safe-area-inset-right, 0px)) 20px max(16px, env(safe-area-inset-left, 0px));font-size:12px;color:var(--muted)}
   @media (prefers-reduced-motion: reduce){*{scroll-behavior:auto}}
 </style>
@@ -76,6 +123,7 @@
 <header>
   <h1>Keplers Flächensatz</h1>
   <span class="note" style="margin:0">Ein Planet um die Sonne: In gleichen Zeiten überstreicht die Verbindungslinie zur Sonne … gleiche Flächen?</span>
+  <span class="note headnote">Bahn aus Newtons Gravitationsgesetz berechnet, Flächen gemessen, nicht vorausgesetzt. Zeitraffer.</span>
 </header>
 
 <main>
@@ -85,7 +133,7 @@
     <div class="overlay2" id="scaleInfo"></div>
   </div>
 
-  <div class="card">
+  <div class="card" id="ctrl">
     <div class="step">Himmelskörper</div>
     <div class="presets" id="presets"></div>
 
@@ -96,7 +144,7 @@
     <div class="row"><label for="spdIn">Ein Umlauf dauert</label><input type="range" id="spdIn" min="3" max="30" step="1"><output id="spdOut"></output></div>
 
     <div class="step">Anzeigen</div>
-    <div class="toggles">
+    <div class="toggles" id="toggles">
       <label><input type="checkbox" id="showV" checked> Geschwindigkeitspfeil</label>
       <label><input type="checkbox" id="showF" checked> Kraftpfeil</label>
       <label><input type="checkbox" id="showNum" checked> Flächen nummerieren</label>
@@ -116,24 +164,30 @@
       <dl class="data" id="lawData" style="margin-top:8px"></dl>
     </div>
 
-    <div class="step">Verlauf während eines Umlaufs</div>
-    <canvas id="lplot" style="width:100%;height:230px;display:block;background:#fbfaf7;border:1px solid var(--line);border-radius:8px" aria-label="Verlauf von r, v senkrecht und r mal v senkrecht während eines Umlaufs"></canvas>
-    <p class="note">Jede Kurve hat ihre eigene Achse, alle beginnen bei 0. Zeit von 0 bis zu einem ganzen Umlauf T.</p>
-
-    <div class="step">Messwerte</div>
-    <dl class="data" id="data"></dl>
-
-    <div class="step">Überstrichene Flächen (gleiche Zeitabschnitte)</div>
-    <div class="tablewrap"><table id="secTable"></table></div>
-    <p class="note" id="secNote"></p>
   </div>
 
-  <section class="card chatcard" aria-labelledby="chatTitle">
-    <div class="step" id="chatTitle" style="margin-top:2px">KI-Tutor</div>
+  <section class="card chatcard" id="side">
+    <div class="step" style="margin-top:0">Verlauf während eines Umlaufs</div>
+    <div class="plotwrap"><canvas id="lplot" aria-label="Verlauf von r, v senkrecht und r mal v senkrecht während eines Umlaufs"></canvas></div>
+    <p class="note">Jede Kurve hat ihre eigene Achse, alle beginnen bei 0. Zeit von 0 bis zu einem ganzen Umlauf T.</p>
+    <div class="tabs" role="tablist">
+      <button type="button" role="tab" class="tab sel" id="tabTutor" aria-selected="true" aria-controls="paneTutor">KI-Tutor</button>
+      <button type="button" role="tab" class="tab" id="tabData" aria-selected="false" aria-controls="paneData">Messwerte und Flächen</button>
+    </div>
+
+    <div class="pane" id="paneData" role="tabpanel" aria-labelledby="tabData" hidden>
+      <div class="step">Messwerte</div>
+      <dl class="data" id="data"></dl>
+      <div class="step">Überstrichene Flächen (gleiche Zeitabschnitte)</div>
+      <div class="tablewrap"><table id="secTable"></table></div>
+      <p class="note" id="secNote"></p>
+    </div>
+
+    <div class="pane" id="paneTutor" role="tabpanel" aria-labelledby="tabTutor">
     <p class="note" style="margin:0"><span id="stateNote">Der Tutor sieht die aktuellen Werte der Simulation. </span>Schreibe keine Namen oder persönlichen Daten. Die KI kann sich irren: Prüfe ihre Aussagen in der Simulation.</p>
     <div class="chatlog" id="chatLog" aria-live="polite"></div>
     <div id="embedWrap" hidden>
-      <iframe id="tutorFrame" title="KI-Tutor" allow="clipboard-write" style="width:100%;height:620px;border:1px solid var(--line);border-radius:8px;background:#fff;margin-top:8px"></iframe>
+      <iframe id="tutorFrame" title="KI-Tutor" allow="clipboard-write"></iframe>
       <p class="note">Erscheint der Tutor hier nicht? <a id="tutorLink" target="_blank" rel="noopener">Tutor in einem neuen Fenster öffnen</a> und das Fenster neben die Simulation legen.</p>
     </div>
     <div id="chatStart" class="controls"><button class="primary" id="startBtn">Tutor starten</button><span class="note" id="chatInfo" style="margin:0"></span></div>
@@ -142,6 +196,7 @@
       <button class="primary" id="sendBtn" type="submit">Senden</button>
       <button id="newChatBtn" type="button">Neu</button>
     </form>
+    </div>
   </section>
 </main>
 
@@ -520,6 +575,16 @@ $("playBtn").onclick = () => {
 };
 $("resetBtn").onclick = () => resetSim();
 window.addEventListener("resize", () => { fitCanvas(); fitPlot(); });
+
+/* Reiter rechts: KI-Tutor oder Messwerte */
+function showTab(which){
+  const tutor = which === "tutor";
+  $("paneTutor").hidden = !tutor; $("paneData").hidden = tutor;
+  $("tabTutor").classList.toggle("sel", tutor); $("tabData").classList.toggle("sel", !tutor);
+  $("tabTutor").setAttribute("aria-selected", tutor); $("tabData").setAttribute("aria-selected", !tutor);
+}
+$("tabTutor").onclick = () => showTab("tutor");
+$("tabData").onclick = () => showTab("data");
 
 /* ============================================================
    KI-TUTOR
