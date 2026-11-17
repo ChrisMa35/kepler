@@ -27,6 +27,9 @@
   .lv{font-size:12px;font-weight:600;line-height:1;padding:6px 9px;border-radius:12px;background:var(--soft);color:var(--muted)}
   .lv.on{background:var(--accent);color:#fff}
   .lv.done{background:#dfe9f3;color:var(--accent)}
+  button.lv{border:0;cursor:pointer;font-size:12px;padding:6px 9px;border-radius:12px}
+  button.lv:hover:not(.on){background:#cfdcea;color:var(--accent)}
+  button.lv.on,button.lv.on:hover:not(:disabled){background:var(--accent);color:#fff}
   main{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:16px;padding:16px max(16px, env(safe-area-inset-right, 0px)) 16px max(16px, env(safe-area-inset-left, 0px));max-width:1320px;margin:0 auto}
   @media (max-width:880px){main{grid-template-columns:1fr}}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;min-width:0}
@@ -153,6 +156,7 @@
   <div class="card">
     <h2>Geschafft: Du hast Newtons Gedankenexperiment nachgebaut!</h2>
     <p class="hint" style="margin-top:0">Links deine Bahnen, rechts Newtons eigene Abbildung.</p>
+    <p class="hint" id="autoNote" style="margin-top:0"></p>
     <div class="sumgrid">
       <canvas id="cvSum" width="900" height="900" aria-label="Alle deine Bahnen"></canvas>
       <div class="newton" id="newtonBox">
@@ -334,7 +338,7 @@ const REFS = [
 /* ============================================================
    ZUSTAND
    ============================================================ */
-const state = { li: 0, shots: [], prediction: null, anim: null, finished: false, records: [], answers: [],
+const state = { endTimer: null, li: 0, shots: [], prediction: null, anim: null, finished: false, records: [], answers: [],
                 tips: 0, predOK: 0, stats: [], tableRight: 0, tableChecked: false, selfRates: [] };
 
 /* Punkte */
@@ -466,8 +470,46 @@ const vRange = $("vRange"), vNum = $("vNum");
 function level(){ return LEVELS[state.li]; }
 
 function buildLevelDots(){
-  $("levelDots").innerHTML = LEVELS.map((L, i) =>
-    `<span class="lv ${state.finished || i < state.li ? "done" : i === state.li ? "on" : ""}">Level ${L.id}</span>`).join("");
+  const box = $("levelDots");
+  box.innerHTML = LEVELS.map((L, i) => {
+    const cls = !state.finished && i === state.li ? "on" : state.records[i] && !state.records[i].auto ? "done" : "";
+    return `<button class="lv ${cls}" data-go="${i}" title="Zu Level ${L.id}">Level ${L.id}</button>`;
+  }).join("") + `<button class="lv ${state.finished ? "on" : ""}" data-go="sum" title="Zur Auswertung">Auswertung</button>`;
+  box.querySelectorAll("button[data-go]").forEach(b => b.onclick = () =>
+    b.dataset.go === "sum" ? goSummary() : goLevel(+b.dataset.go));
+}
+
+/* Navigation zwischen den Seiten (Levels und Auswertung) */
+function stopRunning(){
+  state.anim = null;
+  if (state.endTimer){ clearTimeout(state.endTimer); state.endTimer = null; }
+  if (!$("reflect").hidden && !state.finished) state.answers[state.li] = $("answer").value.trim();
+}
+function goLevel(i){
+  stopRunning();
+  if (state.finished){
+    state.finished = false;
+    $("summary").hidden = true; $("game").hidden = false;
+    fitCanvas(cv);
+  }
+  state.li = i;
+  setupLevel();
+  window.scrollTo(0, 0);
+}
+function goSummary(){
+  stopRunning();
+  /* Nicht gespielte Levels: richtige Geschwindigkeit als Bahn zeigen */
+  const missing = [];
+  LEVELS.forEach((L, i) => {
+    if (!state.records[i]){
+      state.records[i] = { v: L.correct, out: outcome(L.correct), pts: samplePath(L.correct), auto: true };
+      missing.push(L.id);
+    }
+  });
+  showSummary();
+  const auto = state.records.map((r, i) => r.auto ? LEVELS[i].id : null).filter(x => x !== null);
+  $("autoNote").textContent = auto.length ? `Nicht gespielt: Level ${auto.join(", ")}. Dort ist die Bahn mit der richtigen Geschwindigkeit eingezeichnet.` : "";
+  window.scrollTo(0, 0);
 }
 
 function setupLevel(){
@@ -608,7 +650,7 @@ function finishShot(){
   drawScene(cv, ctx, L, { ghosts: state.shots, axisFor: v0 });
 
   const levelOver = verdict.hit || state.shots.length >= SHOTS_PER_LEVEL;
-  if (levelOver) setTimeout(endLevel, 900);
+  if (levelOver) state.endTimer = setTimeout(() => { state.endTimer = null; endLevel(); }, 900);
   else { $("fireBtn").disabled = true; }
 }
 
@@ -708,8 +750,8 @@ function closestShot(L){
 
 $("nextBtn").onclick = () => {
   state.answers[state.li] = $("answer").value.trim();
-  if (state.li < LEVELS.length - 1){ state.li++; setupLevel(); }
-  else showSummary();
+  if (state.li < LEVELS.length - 1){ state.li++; setupLevel(); window.scrollTo(0, 0); }
+  else goSummary();
 };
 
 function redraw(){
