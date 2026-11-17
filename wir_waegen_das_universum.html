@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wir wägen das Universum</title>
+<!--
+  Gemeinsame Tabelle zum 3. Keplerschen Gesetz (Arbeitsblatt «Vom Apfel zu den Planetenbahnen»).
+  Jede Gruppe berechnet a³, T² und M = 4π²a³/(G T²) für ein Objekt und trägt die Werte ein.
+  Das Diagramm T² gegen a³ (log-log) entsteht live aus den Werten der ganzen Klasse.
+
+  Datenspeicher: Google-Tabelle über ein Google-Apps-Script (siehe Code.gs).
+  BACKEND_URL leer lassen = Demo-Modus (nur auf diesem Gerät, im Browser gespeichert).
+-->
+<style>
+  :root{
+    --bg:#f6f4ef; --panel:#ffffff; --ink:#232323; --muted:#6b665e; --line:#d9d4ca;
+    --accent:#1f4e79; --soft:#f1ede4; --okbg:#e5f2e6; --badbg:#f8e7e2; --warnbg:#fff4d6;
+    --c1:#2a78d6; --c2:#eb6834; --c3:#1baf7a; --c4:#eda100; --c5:#e87ba4;
+  }
+  /* Bewusst nur ein (helles) Farbschema: Papier-Look passend zum Arbeitsblatt */
+  *{box-sizing:border-box}
+  [hidden]{display:none!important}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 Inter,system-ui,-apple-system,"Segoe UI",sans-serif;color-scheme:light}
+  header{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;padding:12px max(16px, env(safe-area-inset-right, 0px)) 12px max(16px, env(safe-area-inset-left, 0px));background:var(--panel);border-bottom:1px solid var(--line)}
+  header h1{font-size:19px;margin:0}
+  .room{margin-left:auto;font-size:13px;color:var(--muted)}
+  .banner{background:var(--warnbg);font-size:13px;padding:6px max(16px, env(safe-area-inset-right, 0px)) 6px max(16px, env(safe-area-inset-left, 0px))}
+  main{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.25fr);gap:16px;padding:16px max(16px, env(safe-area-inset-right, 0px)) 16px max(16px, env(safe-area-inset-left, 0px));max-width:1360px;margin:0 auto}
+  @media (max-width:920px){main{grid-template-columns:1fr}}
+  .col{display:flex;flex-direction:column;gap:16px;min-width:0}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;min-width:0}
+  h2{font-size:16px;margin:0 0 8px}
+  .step{font-size:11px;font-weight:700;line-height:1;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:12px 0 6px}
+  label.f{display:block;font-size:13px;color:var(--muted);margin:8px 0 3px}
+  input[type=text],select,textarea{width:100%;font:inherit;padding:7px 9px;border:1.5px solid var(--line);border-radius:7px;background:#fff;color:var(--ink)}
+  textarea{min-height:60px}
+  .given{background:#eef3f8;border-radius:8px;padding:8px 12px;margin-top:8px;display:grid;grid-template-columns:auto 1fr;gap:2px 12px;font-variant-numeric:tabular-nums}
+  .given dt{color:var(--muted)} .given dd{margin:0;font-weight:600}
+  .grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+  @media (max-width:520px){.grid3{grid-template-columns:1fr}}
+  .fb{font-size:12.5px;min-height:18px;margin-top:2px}
+  .fb.ok{color:#2f7d32} .fb.bad{color:#9a3824}
+  input.ok{border-color:#2f7d32;background:var(--okbg)} input.bad{border-color:#b5452f;background:var(--badbg)}
+  button{font:inherit;font-weight:600;font-size:14px;line-height:1;border-radius:8px;border:1.5px solid var(--ink);background:#fff;color:var(--ink);padding:9px 12px;cursor:pointer}
+  button:hover:not(:disabled){background:var(--soft)}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  button.primary:hover:not(:disabled){background:#173b5c}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid #8fb6da;outline-offset:2px}
+  .actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:10px}
+  .msg{font-size:13px;color:var(--muted)}
+  .hint{font-size:13px;color:var(--muted)}
+  canvas{display:block;width:100%;height:auto;aspect-ratio:4/3;max-width:100%}
+  .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:13px;margin-top:6px}
+  .legend span{display:flex;gap:6px;align-items:center}
+  .dot{width:10px;height:10px;border-radius:50%;display:inline-block}
+  .tablewrap{overflow-x:auto;max-height:320px;overflow-y:auto}
+  table{border-collapse:collapse;width:100%;font-size:13.5px;font-variant-numeric:tabular-nums}
+  th,td{border:1px solid var(--line);padding:5px 8px;text-align:left;white-space:nowrap}
+  th{background:var(--soft);position:sticky;top:0}
+  td.num{text-align:right}
+  .feed{display:flex;flex-direction:column;gap:8px;max-height:300px;overflow-y:auto;margin-top:8px}
+  .post{border:1px solid var(--line);border-radius:8px;padding:7px 10px}
+  .post .who{font-size:12px;color:var(--muted)}
+  .prompts{margin:0;padding-left:18px;font-size:14px}
+  footer{max-width:1360px;margin:0 auto;padding:4px max(16px, env(safe-area-inset-right, 0px)) 20px max(16px, env(safe-area-inset-left, 0px));font-size:12px;color:var(--muted)}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Wir wägen das Universum</h1>
+  <span class="hint">3. Keplersches Gesetz: Aus Bahnradius und Umlaufzeit die Masse des Zentralkörpers bestimmen</span>
+  <span class="room" id="roomInfo"></span>
+</header>
+<div class="banner" id="demoBanner" hidden>Demo-Modus: Die Einträge werden nur in diesem Browser gespeichert. Für die Klasse muss die Lehrperson eine Datenverbindung einrichten.</div>
+
+<main>
+  <div class="col">
+    <div class="card">
+      <h2>1 · Euer Objekt</h2>
+      <label class="f" for="group">Gruppenname (keine echten Namen)</label>
+      <input type="text" id="group" maxlength="30" placeholder="z. B. Gruppe 4">
+      <label class="f" for="obj">Objekt</label>
+      <select id="obj"></select>
+      <dl class="given" id="given"></dl>
+      <p class="hint" style="margin:8px 0 0">1 AE = 1.496 · 10¹¹ m · 1 a = 3.156 · 10⁷ s · 1 d = 86 400 s · G = 6.674 · 10⁻¹¹ N m²/kg²</p>
+    </div>
+
+    <div class="card">
+      <h2>2 · Eure Rechnung</h2>
+      <p class="hint" style="margin:0">Rechnet in SI-Einheiten. Schreibweise: 1.23e24 oder 1.23·10^24.</p>
+      <div class="grid3">
+        <div><label class="f" for="a3">a³ in m³</label><input type="text" id="a3" inputmode="decimal" autocomplete="off"><div class="fb" id="a3fb"></div></div>
+        <div><label class="f" for="t2">T² in s²</label><input type="text" id="t2" inputmode="decimal" autocomplete="off"><div class="fb" id="t2fb"></div></div>
+        <div><label class="f" for="m">M = 4π²a³/(G T²) in kg</label><input type="text" id="m" inputmode="decimal" autocomplete="off"><div class="fb" id="mfb"></div></div>
+      </div>
+      <div class="actions">
+        <button id="checkBtn">Rechnung prüfen</button>
+        <button class="primary" id="sendBtn" disabled>In die gemeinsame Tabelle eintragen</button>
+        <span class="msg" id="sendMsg"></span>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>4 · Diskussion</h2>
+      <ol class="prompts">
+        <li>Wie viele Gruppen von Punkten seht ihr im Diagramm?</li>
+        <li>Was haben die Objekte einer Gruppe gemeinsam?</li>
+        <li>Warum liegen die Gruppen auf parallelen Geraden, aber verschieden hoch?</li>
+      </ol>
+      <label class="f" for="post">Euer Beitrag</label>
+      <textarea id="post" maxlength="400" placeholder="Was fällt euch auf?"></textarea>
+      <div class="actions"><button id="postBtn">Beitrag senden</button><span class="msg" id="postMsg"></span></div>
+      <div class="feed" id="feed"></div>
+    </div>
+  </div>
+
+  <div class="col">
+    <div class="card">
+      <h2>3 · Das Diagramm der Klasse</h2>
+      <canvas id="cv" width="1000" height="750" aria-label="Diagramm T² gegen a³ mit allen Einträgen der Klasse"></canvas>
+      <div class="legend" id="legend"></div>
+      <div class="actions">
+        <button id="fitBtn" hidden>Auswertung zeigen</button>
+        <span class="msg" id="syncMsg"></span>
+      </div>
+      <div id="fitBox" hidden></div>
+    </div>
+
+    <div class="card">
+      <h2>Alle Einträge</h2>
+      <div class="tablewrap"><table id="tbl"></table></div>
+    </div>
+  </div>
+</main>
+
+<footer>Werte: a = grosse Halbachse, T = Umlaufzeit, e = Exzentrizität. Die Werte der Sterne um Sgr A* sind gerundet.</footer>
+
+<script>
+"use strict";
+/* ============================================================
+   KONFIGURATION
+   ============================================================ */
+const BACKEND_URL = "";            // URL der Apps-Script-Web-App einfügen (siehe Anleitung)
+const REFRESH_MS = 8000;           // wie oft neue Einträge geladen werden
+const TOL = 0.02;                  // 2 % Toleranz bei der Prüfung
+
+/* ============================================================
+   DATEN (30 Objekte)
+   ============================================================ */
+const AU = 1.495978707e11, YR = 3.15576e7, DAY = 86400, MIN = 60, KM = 1e3, G = 6.674e-11;
+const UNIT = { km: KM, AE: AU, min: MIN, d: DAY, a: YR };
+const FAM = {
+  Erde:    { color: "#2a78d6" },
+  Jupiter: { color: "#eb6834" },
+  Saturn:  { color: "#1baf7a" },
+  Sonne:   { color: "#eda100" },
+  "Sgr A* (Schwarzes Loch)": { color: "#e87ba4" }
+};
+const OBJ = [
+  ["Erde","ISS",6790,"km",92.7,"min",0.0005],["Erde","GPS-Satellit",26560,"km",717.97,"min",0.01],
+  ["Erde","Geostationärer Satellit",42164,"km",1436.07,"min",0.0002],["Erde","Mond",384400,"km",27.322,"d",0.0549],
+  ["Jupiter","Io",421700,"km",1.769,"d",0.0041],["Jupiter","Europa",671100,"km",3.551,"d",0.0094],
+  ["Jupiter","Ganymed",1070400,"km",7.155,"d",0.0013],["Jupiter","Kallisto",1882700,"km",16.689,"d",0.0074],
+  ["Saturn","Enceladus",237948,"km",1.370,"d",0.0047],["Saturn","Dione",377396,"km",2.737,"d",0.0022],
+  ["Saturn","Rhea",527108,"km",4.518,"d",0.0013],["Saturn","Titan",1221870,"km",15.945,"d",0.0288],
+  ["Sonne","Merkur",0.387,"AE",0.2408,"a",0.2056],["Sonne","Venus",0.723,"AE",0.6152,"a",0.0068],
+  ["Sonne","Erde",1.000,"AE",1.0000,"a",0.0167],["Sonne","Mars",1.524,"AE",1.881,"a",0.0934],
+  ["Sonne","Ceres",2.77,"AE",4.60,"a",0.0785],["Sonne","Jupiter",5.203,"AE",11.86,"a",0.0489],
+  ["Sonne","Saturn",9.537,"AE",29.46,"a",0.0565],["Sonne","Uranus",19.19,"AE",84.01,"a",0.0457],
+  ["Sonne","Neptun",30.07,"AE",164.8,"a",0.0113],["Sonne","Pluto",39.48,"AE",248.0,"a",0.2488],
+  ["Sonne","Halleyscher Komet",17.83,"AE",75.3,"a",0.967],
+  ["Sgr A* (Schwarzes Loch)","Stern S55",884,"AE",12.80,"a",0.721],["Sgr A* (Schwarzes Loch)","Stern S2",1029,"AE",16.00,"a",0.884],
+  ["Sgr A* (Schwarzes Loch)","Stern S38",1161,"AE",19.2,"a",0.820],["Sgr A* (Schwarzes Loch)","Stern S13",2165,"AE",49.0,"a",0.425],
+  ["Sgr A* (Schwarzes Loch)","Stern S12",2452,"AE",58.9,"a",0.888],["Sgr A* (Schwarzes Loch)","Stern S8",3321,"AE",92.9,"a",0.803],
+  ["Sgr A* (Schwarzes Loch)","Stern S1",4879,"AE",166.0,"a",0.556]
+].map(([fam, name, a, au, T, tu, e], id) => {
+  const am = a * UNIT[au], Ts = T * UNIT[tu];
+  return { id, fam, name, a, au, T, tu, e, a3: am ** 3, t2: Ts ** 2, M: 4 * Math.PI ** 2 * am ** 3 / (G * Ts ** 2) };
+});
+
+/* ============================================================
+   SPEICHER: Apps Script (Klasse) oder localStorage (Demo)
+   ============================================================ */
+const params = new URLSearchParams(location.search);
+const ROOM = (params.get("klasse") || "klasse").replace(/[^\w-]/g, "").slice(0, 30) || "klasse";
+const DEMO = !BACKEND_URL;
+let RESULTS = [], CHAT = [];
+const TEACHER = params.has("lehrer");
+let unlocked = TEACHER;
+try { if (localStorage.getItem("wdu-unlocked-" + ROOM) === "1") unlocked = true; } catch {}
+
+const store = {
+  async load(){
+    if (DEMO){
+      try { const d = JSON.parse(localStorage.getItem("wdu-" + ROOM) || "{}"); return { results: d.results || [], chat: d.chat || [] }; }
+      catch { return { results: [], chat: [] }; }
+    }
+    const res = await fetch(`${BACKEND_URL}?room=${encodeURIComponent(ROOM)}`, { cache: "no-store" });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    return res.json();
+  },
+  async add(kind, row){
+    row = { ...row, room: ROOM, ts: new Date().toISOString() };
+    if (DEMO){
+      const d = await this.load();
+      (kind === "result" ? d.results : d.chat).push(row);
+      try { localStorage.setItem("wdu-" + ROOM, JSON.stringify(d)); } catch {}
+      return;
+    }
+    // text/plain vermeidet eine CORS-Vorabanfrage, die Apps Script nicht beantwortet
+    const res = await fetch(BACKEND_URL, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ kind, row }) });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+  }
+};
+
+/* ============================================================
+   EINGABE UND PRÜFUNG
+   ============================================================ */
+const $ = id => document.getElementById(id);
+const fmtSci = (v, p = 3) => {
+  if (!isFinite(v) || v === 0) return isFinite(v) ? "0" : "?";
+  let e = Math.floor(Math.log10(Math.abs(v))), m = +(v / 10 ** e).toFixed(p - 1);
+  if (Math.abs(m) >= 10){ m /= 10; e += 1; }
+  return e === 0 ? m.toFixed(p - 1) : `${m.toFixed(p - 1)} · 10${sup(e)}`;
+};
+const sup = n => String(n).split("").map(c => "⁰¹²³⁴⁵⁶⁷⁸⁹"["0123456789".indexOf(c)] || (c === "-" ? "⁻" : c)).join("");
+
+function parseNum(s){
+  if (!s) return NaN;
+  let t = s.trim().replace(/\s+/g, "").replace(/,/g, ".").replace(/[×x·*]10\^?/i, "e").replace(/⁻/g, "-");
+  t = t.replace(/[⁰¹²³⁴⁵⁶⁷⁸⁹]/g, c => "0123456789"["⁰¹²³⁴⁵⁶⁷⁸⁹".indexOf(c)]);
+  const v = Number(t);
+  return isFinite(v) ? v : NaN;
+}
+
+// Häufige Fehler erkennen, ohne die Lösung zu verraten
+function diagnose(got, want, kind){
+  if (!isFinite(got)) return { ok: false, text: "Zahl nicht lesbar." };
+  const r = got / want;
+  if (Math.abs(r - 1) <= TOL) return { ok: true, text: "Stimmt." };
+  const lr = Math.log10(Math.abs(r));
+  const near = k => Math.abs(lr - k) < 0.05;
+  if (kind === "a3" && (near(-9) || near(9))) return { ok: false, text: "Faktor 10⁹ daneben: km in m umgerechnet, bevor ihr hoch drei rechnet?" };
+  if (kind === "t2" && (near(Math.log10(DAY ** 2)) || near(-Math.log10(DAY ** 2)) || near(Math.log10(MIN ** 2)) || near(-Math.log10(MIN ** 2)) || near(Math.log10(YR ** 2)) || near(-Math.log10(YR ** 2))))
+    return { ok: false, text: "Einheit der Zeit prüfen: zuerst in Sekunden umrechnen, dann quadrieren." };
+  if (Math.abs(lr) < 0.3) return { ok: false, text: `Knapp daneben (${((r - 1) * 100).toFixed(0)} %). Rundung oder Konstante prüfen.` };
+  return { ok: false, text: `Daneben, etwa Faktor ${fmtSci(r, 2)}. Einheiten prüfen.` };
+}
+
+function currentObj(){ return OBJ[+$("obj").value]; }
+
+function buildSelect(){
+  const taken = new Set(RESULTS.map(r => +r.objId));
+  const count = f => RESULTS.filter(r => OBJ[+r.objId] && OBJ[+r.objId].fam === f).length;
+  const minCount = Math.min(...Object.keys(FAM).map(count));
+  const prev = $("obj").value;
+  $("obj").innerHTML = Object.keys(FAM).map(f => `<optgroup label="um ${f}${count(f) === minCount ? " (empfohlen)" : ""}">` +
+    OBJ.filter(o => o.fam === f).map(o => `<option value="${o.id}">${o.name}${taken.has(o.id) ? " (schon eingetragen)" : count(f) === minCount ? " · empfohlen" : ""}</option>`).join("") + `</optgroup>`).join("");
+  if (prev !== "") $("obj").value = prev;
+}
+
+function showGiven(){
+  const o = currentObj();
+  $("given").innerHTML = `<dt>Zentralkörper</dt><dd>${o.fam}</dd><dt>Grosse Halbachse a</dt><dd>${o.a.toLocaleString("de-CH")} ${o.au}</dd>
+    <dt>Umlaufzeit T</dt><dd>${o.T.toLocaleString("de-CH")} ${o.tu}</dd><dt>Exzentrizität e</dt><dd>${o.e}</dd>`;
+  ["a3", "t2", "m"].forEach(k => { $(k).className = ""; $(k + "fb").textContent = ""; $(k + "fb").className = "fb"; });
+  $("sendBtn").disabled = true; $("sendMsg").textContent = "";
+}
+
+function check(){
+  const o = currentObj();
+  const res = { a3: diagnose(parseNum($("a3").value), o.a3, "a3"), t2: diagnose(parseNum($("t2").value), o.t2, "t2"), m: diagnose(parseNum($("m").value), o.M, "m") };
+  Object.entries(res).forEach(([k, r]) => {
+    $(k).className = r.ok ? "ok" : "bad"; $(k + "fb").textContent = r.text; $(k + "fb").className = "fb " + (r.ok ? "ok" : "bad");
+  });
+  const all = Object.values(res).every(r => r.ok);
+  $("sendBtn").disabled = !all;
+  $("sendMsg").textContent = all ? "Alles richtig: Jetzt eintragen!" : "Noch nicht alles richtig.";
+  return all;
+}
+
+async function send(){
+  const group = $("group").value.trim();
+  if (!group){ $("sendMsg").textContent = "Bitte zuerst einen Gruppennamen eingeben."; $("group").focus(); return; }
+  if (!check()) return;
+  const o = currentObj();
+  $("sendBtn").disabled = true; $("sendMsg").textContent = "Wird gespeichert …";
+  try {
+    await store.add("result", { group, objId: o.id, a3: parseNum($("a3").value), t2: parseNum($("t2").value), M: parseNum($("m").value) });
+    $("sendMsg").textContent = "Eingetragen. Jetzt seht ihr das ganze Diagramm!";
+    unlocked = true;
+    try { localStorage.setItem("wdu-unlocked-" + ROOM, "1"); } catch {}
+    await refresh();
+  } catch (e){
+    $("sendMsg").textContent = "Speichern nicht möglich. Bitte nochmals versuchen."; $("sendBtn").disabled = false;
+  }
+}
+
+async function postMsg(){
+  const group = $("group").value.trim(), text = $("post").value.trim();
+  if (!group){ $("postMsg").textContent = "Bitte oben einen Gruppennamen eingeben."; return; }
+  if (!text){ $("postMsg").textContent = "Der Beitrag ist leer."; return; }
+  $("postBtn").disabled = true; $("postMsg").textContent = "Wird gesendet …";
+  try { await store.add("chat", { group, text }); $("post").value = ""; $("postMsg").textContent = "Gesendet."; await refresh(); }
+  catch { $("postMsg").textContent = "Senden nicht möglich. Bitte nochmals versuchen."; }
+  $("postBtn").disabled = false;
+}
+
+/* ============================================================
+   DIAGRAMM (log-log)
+   ============================================================ */
+const cv = $("cv"), ctx = cv.getContext("2d");
+let showFit = false;
+
+function fitCanvas(){
+  const dpr = window.devicePixelRatio || 1, w = cv.clientWidth || 800;
+  cv.width = Math.round(w * dpr); cv.height = Math.round(w * 0.75 * dpr);
+}
+
+// Alle Punkte: Einträge der Klasse + (nach dem eigenen Eintrag) die übrigen Objekte als «ergänzt»
+function allPoints(){
+  const cls = RESULTS.map(r => ({ o: OBJ[+r.objId], a3: +r.a3, t2: +r.t2, M: +r.M, mine: true })).filter(p => p.o);
+  if (!unlocked) return cls;
+  const taken = new Set(RESULTS.map(r => +r.objId));
+  return cls.concat(OBJ.filter(o => !taken.has(o.id)).map(o => ({ o, a3: o.a3, t2: o.t2, M: o.M, mine: false })));
+}
+
+function draw(){
+  const W = cv.width, H = cv.height, f = W / 1000;
+  const L = 90 * f, R = 20 * f, T = 20 * f, B = 70 * f;
+  const x0 = 19, x1 = 47, y0 = 6, y1 = 22;     // log10-Bereiche von a³ und T²
+  const X = v => L + (v - x0) / (x1 - x0) * (W - L - R), Y = v => H - B - (v - y0) / (y1 - y0) * (H - T - B);
+  ctx.clearRect(0, 0, W, H); ctx.fillStyle = "#fbfaf7"; ctx.fillRect(0, 0, W, H);
+  ctx.font = `${Math.round(15 * f)}px Inter, system-ui, sans-serif`; ctx.fillStyle = "#6b665e"; ctx.strokeStyle = "#ece9e2"; ctx.lineWidth = 1;
+  for (let v = 20; v <= x1; v += 4){ ctx.beginPath(); ctx.moveTo(X(v), T); ctx.lineTo(X(v), H - B); ctx.stroke(); ctx.textAlign = "center"; ctx.fillText(`10${sup(v)}`, X(v), H - B + 24 * f); }
+  for (let v = 6; v <= y1; v += 2){ ctx.beginPath(); ctx.moveTo(L, Y(v)); ctx.lineTo(W - R, Y(v)); ctx.stroke(); ctx.textAlign = "right"; ctx.fillText(`10${sup(v)}`, L - 8 * f, Y(v) + 5 * f); }
+  ctx.strokeStyle = "#232323"; ctx.beginPath(); ctx.moveTo(L, T); ctx.lineTo(L, H - B); ctx.lineTo(W - R, H - B); ctx.stroke();
+  ctx.fillStyle = "#232323"; ctx.textAlign = "center"; ctx.fillText("a³ in m³", (L + W - R) / 2, H - 18 * f);
+  ctx.save(); ctx.translate(24 * f, (T + H - B) / 2); ctx.rotate(-Math.PI / 2); ctx.fillText("T² in s²", 0, 0); ctx.restore();
+
+  const PTS = allPoints();
+  if (showFit){
+    Object.entries(FAM).forEach(([fam, { color }]) => {
+      const pts = PTS.filter(p => p.o.fam === fam);
+      if (!pts.length) return;
+      const Mmean = pts.reduce((s, p) => s + p.M, 0) / pts.length;
+      const off = Math.log10(4 * Math.PI ** 2 / (G * Mmean));
+      const xs = pts.map(p => Math.log10(p.a3)), xa = Math.min(...xs) - 1.5, xb = Math.max(...xs) + 1.5;
+      ctx.strokeStyle = color; ctx.lineWidth = 2 * f; ctx.setLineDash([8 * f, 6 * f]);
+      ctx.beginPath(); ctx.moveTo(X(xa), Y(xa + off)); ctx.lineTo(X(xb), Y(xb + off)); ctx.stroke(); ctx.setLineDash([]);
+    });
+  }
+  // zuerst die ergänzten (hohl), dann die der Klasse (voll) darüber
+  PTS.slice().sort((p, q) => p.mine - q.mine).forEach(p => {
+    const x = Math.log10(p.a3), y = Math.log10(p.t2);
+    if (!isFinite(x) || !isFinite(y)) return;
+    ctx.beginPath(); ctx.arc(X(x), Y(y), 7 * f, 0, 2 * Math.PI);
+    if (p.mine){ ctx.fillStyle = FAM[p.o.fam].color; ctx.fill(); ctx.strokeStyle = "#fff"; ctx.lineWidth = 2 * f; ctx.stroke(); }
+    else { ctx.fillStyle = "#fbfaf7"; ctx.fill(); ctx.strokeStyle = FAM[p.o.fam].color; ctx.lineWidth = 2.5 * f; ctx.stroke(); }
+  });
+  if (!PTS.length){ ctx.fillStyle = "#6b665e"; ctx.textAlign = "center"; ctx.fillText("Noch keine Einträge: Das Diagramm füllt sich, sobald die ersten Gruppen eintragen.", (L + W - R) / 2, (T + H - B) / 2); }
+  ctx.textAlign = "left";
+}
+
+function renderLegend(){
+  const n = RESULTS.filter(r => OBJ[+r.objId]).length;
+  $("legend").innerHTML = Object.entries(FAM).map(([f, { color }]) =>
+    `<span><i class="dot" style="background:${color}"></i>um ${f} (${RESULTS.filter(r => OBJ[+r.objId] && OBJ[+r.objId].fam === f).length})</span>`).join("") +
+    `<span style="flex-basis:100%;color:var(--muted)">${unlocked
+      ? `Volle Punkte: von der Klasse berechnet (${n}). Hohle Punkte: übrige Objekte, ergänzt (${OBJ.length - new Set(RESULTS.map(r => +r.objId)).size}).`
+      : "Tragt euer Ergebnis ein: Dann seht ihr das ganze Diagramm mit allen 30 Objekten."}</span>`;
+}
+
+function renderFit(){
+  if (!showFit){ $("fitBox").hidden = true; return; }
+  const PTS = allPoints();
+  const rows = Object.keys(FAM).map(fam => {
+    const pts = PTS.filter(p => p.o.fam === fam);
+    if (!pts.length) return "";
+    const M = pts.reduce((s, p) => s + p.M, 0) / pts.length;
+    return `<tr><td><i class="dot" style="background:${FAM[fam].color}"></i> ${fam}</td><td class="num">${pts.length}</td><td class="num">${fmtSci(M)} kg</td><td class="num">${fmtSci(M / 1.989e30)}</td></tr>`;
+  }).join("");
+  $("fitBox").hidden = false;
+  $("fitBox").innerHTML = `<p class="hint" style="margin:10px 0 4px">Gestrichelt: T² = 4π²/(GM) · a³ mit dem Mittelwert von M jeder Gruppe. In der log-log-Darstellung sind das parallele Geraden mit Steigung 1.</p>
+    <div class="tablewrap"><table><tr><th>Zentralkörper</th><th>Einträge</th><th>Masse M (Mittelwert)</th><th>in Sonnenmassen</th></tr>${rows}</table></div>`;
+}
+
+function renderTable(){
+  const rows = RESULTS.slice().reverse().map(r => {
+    const o = OBJ[+r.objId]; if (!o) return "";
+    return `<tr><td>${esc(r.group)}</td><td><i class="dot" style="background:${FAM[o.fam].color}"></i> ${o.name}</td><td>${o.fam}</td>
+      <td class="num">${fmtSci(+r.a3)}</td><td class="num">${fmtSci(+r.t2)}</td><td class="num">${fmtSci(+r.M)}</td></tr>`;
+  }).join("");
+  $("tbl").innerHTML = `<tr><th>Gruppe</th><th>Objekt</th><th>um</th><th>a³ [m³]</th><th>T² [s²]</th><th>M [kg]</th></tr>${rows ||
+    `<tr><td colspan="6" style="color:var(--muted)">Noch keine Einträge.</td></tr>`}`;
+}
+
+function renderFeed(){
+  $("feed").innerHTML = CHAT.slice().reverse().map(c =>
+    `<div class="post"><div class="who">${esc(c.group)} · ${new Date(c.ts).toLocaleTimeString("de-CH", {hour: "2-digit", minute: "2-digit"})}</div>${esc(c.text)}</div>`).join("")
+    || `<p class="hint" style="margin:0">Noch keine Beiträge.</p>`;
+}
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+/* ============================================================
+   SYNCHRONISIEREN
+   ============================================================ */
+async function refresh(){
+  try {
+    const d = await store.load();
+    RESULTS = (d.results || []).filter(r => OBJ[+r.objId]);
+    CHAT = d.chat || [];
+    $("syncMsg").textContent = `${RESULTS.length} Einträge · aktualisiert ${new Date().toLocaleTimeString("de-CH")}`;
+  } catch {
+    $("syncMsg").textContent = "Verbindung zur Tabelle unterbrochen, neuer Versuch folgt.";
+  }
+  buildSelect(); renderLegend(); renderTable(); renderFeed(); renderFit(); draw();
+}
+
+/* ============================================================
+   START
+   ============================================================ */
+$("roomInfo").textContent = `Klasse: ${ROOM}`;
+$("demoBanner").hidden = !DEMO;
+$("fitBtn").hidden = !TEACHER;   // Auswertung nur in der Ansicht der Lehrperson (…?lehrer)
+buildSelect(); $("obj").value = "0"; showGiven();
+$("obj").onchange = showGiven;
+$("checkBtn").onclick = check;
+$("sendBtn").onclick = send;
+$("postBtn").onclick = postMsg;
+$("fitBtn").onclick = () => { showFit = !showFit; $("fitBtn").textContent = showFit ? "Auswertung ausblenden" : "Auswertung zeigen"; renderFit(); draw(); };
+["a3", "t2", "m"].forEach(k => $(k).addEventListener("input", () => { $("sendBtn").disabled = true; }));
+window.addEventListener("resize", () => { fitCanvas(); draw(); });
+fitCanvas(); refresh();
+setInterval(refresh, REFRESH_MS);
+</script>
+</body>
+</html>

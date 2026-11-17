@@ -1,0 +1,640 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Keplers Flächensatz</title>
+<!--
+  Simulation zum 2. Keplerschen Gesetz (Arbeitsblatt «Vom Apfel zu den Planetenbahnen»).
+  Physik: numerische Integration von a = −GM r / r³ (Velocity Verlet, adaptiver Zeitschritt dt = η r^(3/2) / √GM).
+  Die gleichen Flächen werden NICHT vorausgesetzt: Sie werden aus der Bahn gemessen.
+  (acceleration() behält den Parameter eps aus kepler2.py; die Seite nutzt nur eps = 0.)
+  Einheiten: AE, Jahre; GM_Sonne = 4π² AE³/a². Entspricht eins zu eins kepler2.py (Python-Referenz).
+-->
+<style>
+  :root{
+    --bg:#f6f4ef; --panel:#ffffff; --ink:#232323; --muted:#6b665e; --line:#d9d4ca;
+    --accent:#1f4e79; --planet:#1f4e79; --sun:#e0a526; --force:#b5452f; --soft:#f1ede4;
+    --secA:rgba(31,78,121,.22); --secB:rgba(211,154,28,.28); --secNow:rgba(181,69,47,.18);
+    --okbg:#e5f2e6; --badbg:#f8e7e2;
+  }
+  /* Bewusst nur ein (helles) Farbschema: Papier-Look passend zum Arbeitsblatt */
+  *{box-sizing:border-box}
+  [hidden]{display:none!important}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 Inter,system-ui,-apple-system,"Segoe UI",sans-serif;color-scheme:light}
+  header{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;padding:12px max(16px, env(safe-area-inset-right, 0px)) 12px max(16px, env(safe-area-inset-left, 0px));background:var(--panel);border-bottom:1px solid var(--line)}
+  header h1{font-size:19px;margin:0}
+  main{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:16px;padding:16px max(16px, env(safe-area-inset-right, 0px)) 16px max(16px, env(safe-area-inset-left, 0px));max-width:1320px;margin:0 auto}
+  @media (max-width:880px){main{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;min-width:0}
+  #stage{position:relative;padding:0;overflow:hidden;align-self:start}
+  canvas{display:block;width:100%;height:auto;aspect-ratio:1/1;max-width:100%}
+  .overlay{position:absolute;left:10px;top:10px;font-size:12px;color:var(--muted);background:rgba(255,255,255,.88);padding:4px 8px;border-radius:6px;font-variant-numeric:tabular-nums}
+  .overlay2{position:absolute;right:10px;top:10px;font-size:12px;color:var(--muted);background:rgba(255,255,255,.88);padding:4px 8px;border-radius:6px;text-align:right;font-variant-numeric:tabular-nums}
+  .step{font-size:11px;font-weight:700;line-height:1;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:14px 0 6px}
+  .step:first-child{margin-top:0}
+  .presets{display:flex;gap:6px;flex-wrap:wrap}
+  button{font:inherit;font-weight:600;font-size:14px;line-height:1;border-radius:8px;border:1.5px solid var(--ink);background:#fff;color:var(--ink);padding:9px 12px;cursor:pointer}
+  button:hover:not(:disabled){background:var(--soft)}
+  button.sel,button.sel:hover:not(:disabled){background:var(--accent);border-color:var(--accent);color:#fff}
+  button.primary{background:var(--force);border-color:var(--force);color:#fff}
+  button.primary:hover:not(:disabled){background:#9a3824}
+  button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #8fb6da;outline-offset:2px}
+  .row{display:grid;grid-template-columns:150px 1fr 70px;gap:10px;align-items:center;margin:4px 0}
+  .row input[type=range]{width:100%;accent-color:var(--accent)}
+  .row output{font-weight:600;text-align:right;font-variant-numeric:tabular-nums}
+  @media (max-width:420px){.row{grid-template-columns:110px 1fr 58px}}
+  .toggles{display:flex;flex-direction:column;gap:4px}
+  .toggles label{display:flex;gap:8px;align-items:center}
+  .controls{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+  .data{display:grid;grid-template-columns:1fr auto;gap:2px 12px;font-size:14px;font-variant-numeric:tabular-nums}
+  .data dt{color:var(--muted)} .data dd{margin:0;text-align:right;font-weight:600}
+  .tablewrap{overflow-x:auto;max-height:340px;overflow-y:auto}
+  table{border-collapse:collapse;width:100%;font-size:14px;font-variant-numeric:tabular-nums}
+  th,td{border:1px solid var(--line);padding:5px 8px;text-align:right}
+  th:first-child,td:first-child{text-align:left}
+  th{background:var(--soft);position:sticky;top:0}
+  .sw{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+  .note{font-size:13px;color:var(--muted);margin:6px 0 0}
+  .law{background:#eef3f8;border-radius:8px;padding:10px 12px}
+  .lawf{font-size:18px;font-weight:700;color:var(--accent)}
+  .chatcard{grid-column:1/-1}
+  .chatlog{max-height:440px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding:4px 2px;margin:8px 0}
+  .msg{max-width:78%;padding:9px 12px;border-radius:12px;line-height:1.45;font-size:15px;white-space:normal;overflow-wrap:anywhere}
+  .msg.tutor{align-self:flex-start;background:#eef3f8;border:1px solid #d6e2ee}
+  .msg.user{align-self:flex-end;background:var(--soft);border:1px solid var(--line)}
+  .msg.err{align-self:center;background:#fbeeea;border:1px solid #efc7bc;color:var(--force);font-size:13px}
+  .chatform{display:flex;gap:8px;align-items:flex-end}
+  .chatform textarea{flex:1;min-width:0;font:inherit;font-size:15px;border:1.5px solid var(--line);border-radius:8px;padding:8px 10px;resize:vertical;min-height:44px;background:#fff;color:var(--ink)}
+  .orbitmsg{font-size:13px;color:var(--accent);font-weight:600;margin:8px 0 0;min-height:1em}
+  footer{max-width:1320px;margin:0 auto;padding:4px max(16px, env(safe-area-inset-right, 0px)) 20px max(16px, env(safe-area-inset-left, 0px));font-size:12px;color:var(--muted)}
+  @media (prefers-reduced-motion: reduce){*{scroll-behavior:auto}}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Keplers Flächensatz</h1>
+  <span class="note" style="margin:0">Ein Planet um die Sonne: In gleichen Zeiten überstreicht die Verbindungslinie zur Sonne … gleiche Flächen?</span>
+</header>
+
+<main>
+  <div class="card" id="stage">
+    <canvas id="cv" width="900" height="900" aria-label="Bahn des Planeten mit den überstrichenen Flächen"></canvas>
+    <div class="overlay" id="clock"></div>
+    <div class="overlay2" id="scaleInfo"></div>
+  </div>
+
+  <div class="card">
+    <div class="step">Himmelskörper</div>
+    <div class="presets" id="presets"></div>
+
+    <div class="step">Bahn</div>
+    <div class="row"><label for="aIn">Grosse Halbachse a</label><input type="range" id="aIn" min="0.3" max="20" step="0.01"><output id="aOut"></output></div>
+    <div class="row"><label for="eIn">Exzentrizität e</label><input type="range" id="eIn" min="0" max="0.97" step="0.001"><output id="eOut"></output></div>
+    <div class="row"><label for="nIn">Anzahl Flächen pro Umlauf</label><input type="range" id="nIn" min="4" max="24" step="1"><output id="nOut"></output></div>
+    <div class="row"><label for="spdIn">Ein Umlauf dauert</label><input type="range" id="spdIn" min="3" max="30" step="1"><output id="spdOut"></output></div>
+
+    <div class="step">Anzeigen</div>
+    <div class="toggles">
+      <label><input type="checkbox" id="showV" checked> Geschwindigkeitspfeil</label>
+      <label><input type="checkbox" id="showF" checked> Kraftpfeil</label>
+      <label><input type="checkbox" id="showNum" checked> Flächen nummerieren</label>
+    </div>
+
+    <div class="controls">
+      <button class="primary" id="playBtn">Pause</button>
+      <button id="resetBtn">Neu starten</button>
+    </div>
+    <p class="orbitmsg" id="orbitMsg" aria-live="polite"></p>
+
+    <div class="step">Das 2. Keplersche Gesetz</div>
+    <div class="law">
+      <p style="margin:0 0 6px">Die Verbindungslinie zwischen Sonne und Planet überstreicht in gleichen Zeiten gleiche Flächen:</p>
+      <div class="lawf">ΔA / Δt = ½ · r · v<sub>⊥</sub></div>
+      <p class="note" style="margin:6px 0 0">v<sub>⊥</sub> ist der Teil der Geschwindigkeit senkrecht zur Verbindungslinie. Ist r klein, muss v<sub>⊥</sub> gross sein.</p>
+      <dl class="data" id="lawData" style="margin-top:8px"></dl>
+    </div>
+
+    <div class="step">Verlauf während eines Umlaufs</div>
+    <canvas id="lplot" style="width:100%;height:230px;display:block;background:#fbfaf7;border:1px solid var(--line);border-radius:8px" aria-label="Verlauf von r, v senkrecht und r mal v senkrecht während eines Umlaufs"></canvas>
+    <p class="note">Jede Kurve hat ihre eigene Achse, alle beginnen bei 0. Zeit von 0 bis zu einem ganzen Umlauf T.</p>
+
+    <div class="step">Messwerte</div>
+    <dl class="data" id="data"></dl>
+
+    <div class="step">Überstrichene Flächen (gleiche Zeitabschnitte)</div>
+    <div class="tablewrap"><table id="secTable"></table></div>
+    <p class="note" id="secNote"></p>
+  </div>
+
+  <section class="card chatcard" aria-labelledby="chatTitle">
+    <div class="step" id="chatTitle" style="margin-top:2px">KI-Tutor</div>
+    <p class="note" style="margin:0"><span id="stateNote">Der Tutor sieht die aktuellen Werte der Simulation. </span>Schreibe keine Namen oder persönlichen Daten. Die KI kann sich irren: Prüfe ihre Aussagen in der Simulation.</p>
+    <div class="chatlog" id="chatLog" aria-live="polite"></div>
+    <div id="embedWrap" hidden>
+      <iframe id="tutorFrame" title="KI-Tutor" allow="clipboard-write" style="width:100%;height:620px;border:1px solid var(--line);border-radius:8px;background:#fff;margin-top:8px"></iframe>
+      <p class="note">Erscheint der Tutor hier nicht? <a id="tutorLink" target="_blank" rel="noopener">Tutor in einem neuen Fenster öffnen</a> und das Fenster neben die Simulation legen.</p>
+    </div>
+    <div id="chatStart" class="controls"><button class="primary" id="startBtn">Tutor starten</button><span class="note" id="chatInfo" style="margin:0"></span></div>
+    <form class="chatform" id="chatForm" hidden>
+      <textarea id="chatIn" rows="2" maxlength="800" placeholder="Deine Antwort …" aria-label="Nachricht an den Tutor"></textarea>
+      <button class="primary" id="sendBtn" type="submit">Senden</button>
+      <button id="newChatBtn" type="button">Neu</button>
+    </form>
+  </section>
+</main>
+
+<footer>Bahn berechnet aus Newtons Gravitationsgesetz (numerische Integration). Die Flächen werden gemessen, nicht vorausgesetzt. Zeitraffer.</footer>
+
+<script>
+"use strict";
+/* ============================================================
+   PHYSIK  (entspricht kepler2.py; Einheiten AE und Jahre)
+   ============================================================ */
+const GM = 4 * Math.PI * Math.PI;      // AE^3 / a^2
+const AU_PER_YR_IN_KMS = 4.740470;     // 1 AE/a in km/s
+const ETA = 0.0005;                    // Schrittweitenfaktor
+
+function initialState(a, e){
+  const rp = a * (1 - e);
+  const vp = Math.sqrt(GM * (2 / rp - 1 / a));   // Vis-viva
+  return [rp, 0, 0, vp];
+}
+
+function acceleration(x, y, vx, vy, eps = 0){
+  const r2 = x * x + y * y, r = Math.sqrt(r2);
+  if (r === 0) return [0, 0];
+  let ax = -GM * x / (r2 * r), ay = -GM * y / (r2 * r);
+  if (eps !== 0){
+    const v = Math.hypot(vx, vy);
+    if (v > 0){ ax += eps * GM / r2 * vx / v; ay += eps * GM / r2 * vy / v; }
+  }
+  return [ax, ay];
+}
+
+function verletStep(s, dt, eps = 0){
+  const [x, y, vx, vy] = s;
+  const [ax, ay] = acceleration(x, y, vx, vy, eps);
+  const xn = x + vx * dt + 0.5 * ax * dt * dt;
+  const yn = y + vy * dt + 0.5 * ay * dt * dt;
+  const [axn, ayn] = acceleration(xn, yn, vx, vy, eps);
+  return [xn, yn, vx + 0.5 * (ax + axn) * dt, vy + 0.5 * (ay + ayn) * dt];
+}
+
+function triangleArea(x1, y1, x2, y2){ return 0.5 * Math.abs(x1 * y2 - x2 * y1); }
+
+/* Referenz: entspricht simulate() in kepler2.py (für den Selbsttest) */
+function simulateAreas(a, e, nSectors = 12, eta = ETA, eps = 0){
+  const T = Math.pow(a, 1.5), tSec = T / nSectors;
+  let s = initialState(a, e), t = 0, area = 0, boundary = tSec;
+  const areas = [];
+  while (areas.length < nSectors){
+    const r = Math.hypot(s[0], s[1]);
+    let dt = eta * Math.pow(r, 1.5) / Math.sqrt(GM);
+    if (t + dt >= boundary) dt = boundary - t;
+    const x0 = s[0], y0 = s[1];
+    s = verletStep(s, dt, eps);
+    area += triangleArea(x0, y0, s[0], s[1]);
+    t += dt;
+    if (Math.abs(t - boundary) < 1e-12 * Math.max(1, T)){ areas.push(area); area = 0; boundary += tSec; }
+  }
+  return { areas, state: s };
+}
+
+/* ============================================================
+   VOREINSTELLUNGEN
+   ============================================================ */
+const PRESETS = [
+  { name: "Erde", a: 1.000, e: 0.0167 },
+  { name: "Mars", a: 1.524, e: 0.0934 },
+  { name: "Merkur", a: 0.387, e: 0.2056 },
+  { name: "Halleyscher Komet", a: 17.83, e: 0.967 },
+  { name: "Eigene Bahn", a: 1.0, e: 0.6 }
+];
+
+/* ============================================================
+   ZUSTAND
+   ============================================================ */
+const sim = {
+  a: 1, e: 0.0167, n: 12, secondsPerOrbit: 10,
+  s: null, t: 0, T: 1, tSec: 1 / 12, boundary: 1 / 12, curArea: 0,
+  curPts: [], sectors: [], path: [], running: true, orbitDone: false, hist: [], histT0: 0, last: null, totalSectors: 0, scale: 1
+};
+
+const $ = id => document.getElementById(id);
+const cv = $("cv"), ctx = cv.getContext("2d");
+
+function resetSim(){
+  sim.T = Math.pow(sim.a, 1.5);
+  sim.tSec = sim.T / sim.n;
+  sim.s = initialState(sim.a, sim.e);
+  sim.t = 0; sim.boundary = sim.tSec; sim.curArea = 0;
+  sim.curPts = [[sim.s[0], sim.s[1]]];
+  sim.sectors = []; sim.totalSectors = 0;
+  sim.path = [[sim.s[0], sim.s[1]]];
+  sim.last = null;
+  sim.running = true; sim.orbitDone = false;
+  sim.hist = []; sim.histT0 = 0; recordHist();
+  $("playBtn").textContent = "Pause"; $("orbitMsg").textContent = "";
+  // Sichtfenster: ganze Ellipse (Mitte bei x = −a·e), Sonne im Brennpunkt
+  const rA = sim.a * (1 + sim.e), rP = sim.a * (1 - sim.e);
+  const half = Math.max(sim.a, (rA + rP) / 2) * 1.12;
+  sim.view = { cx: -sim.a * sim.e, cy: 0, half };
+  updateTable(); updateData();
+}
+
+/* ============================================================
+   INTEGRATION IM ANIMATIONSTAKT
+   ============================================================ */
+function advance(simDt){
+  const tEnd = sim.t + simDt, eps = 0;
+  let guard = 0;
+  while (sim.t < tEnd - 1e-15 && guard++ < 200000){
+    const r = Math.hypot(sim.s[0], sim.s[1]);
+    let dt = ETA * Math.pow(r, 1.5) / Math.sqrt(GM);
+    if (sim.t + dt >= sim.boundary) dt = sim.boundary - sim.t;
+    if (sim.t + dt > tEnd) dt = tEnd - sim.t;
+    const x0 = sim.s[0], y0 = sim.s[1];
+    sim.s = verletStep(sim.s, dt, eps);
+    sim.curArea += triangleArea(x0, y0, sim.s[0], sim.s[1]);
+    sim.t += dt;
+    const p = [sim.s[0], sim.s[1]];
+    sim.curPts.push(p);
+    sim.path.push(p);
+    recordHist();
+    if (Math.abs(sim.t - sim.boundary) < 1e-12 * Math.max(1, sim.T)){
+      sim.sectors.push({ pts: thin(sim.curPts, 400), area: sim.curArea, idx: sim.totalSectors++ });
+      if (sim.sectors.length > sim.n) sim.sectors.shift();
+      sim.curPts = [p]; sim.curArea = 0; sim.boundary += sim.tSec;
+      updateTable();
+      // Ein Umlauf ist fertig (n Flächen): anhalten, bis «Noch ein Umlauf» gedrückt wird
+      if (sim.totalSectors % sim.n === 0){ orbitFinished(); return; }
+    }
+  }
+  // nur der letzte Umlauf wird als Spur gezeigt (die Bahn ist geschlossen)
+  if (sim.path.length > 30000) sim.path = thin(sim.path, 15000);
+}
+
+function orbitFinished(){
+  sim.running = false; sim.orbitDone = true;
+  const k = sim.totalSectors / sim.n;
+  $("playBtn").textContent = "Noch ein Umlauf";
+  $("orbitMsg").textContent = `${k === 1 ? "Ein Umlauf" : k + " Umläufe"} fertig. Vergleicht die Flächen in der Tabelle.`;
+}
+
+function thin(pts, max){
+  if (pts.length <= max) return pts.slice();
+  const out = [], step = (pts.length - 1) / (max - 1);
+  for (let i = 0; i < max; i++) out.push(pts[Math.round(i * step)]);
+  return out;
+}
+
+function loop(ts){
+  if (sim.last === null) sim.last = ts;
+  const real = Math.min(0.05, (ts - sim.last) / 1000); sim.last = ts;
+  if (sim.running) advance(real * sim.T / sim.secondsPerOrbit);
+  draw(); drawPlot(); updateData();
+  requestAnimationFrame(loop);
+}
+
+/* ============================================================
+   VERLAUF r(t), v⊥(t), r·v⊥(t)
+   ============================================================ */
+function recordHist(){
+  const [x, y, vx, vy] = sim.s, r = Math.hypot(x, y), vp = Math.abs(x * vy - y * vx) / r;
+  sim.hist.push([sim.t - sim.histT0, r, vp * AU_PER_YR_IN_KMS]);
+  if (sim.hist.length > 6000) sim.hist = thin(sim.hist, 3000);
+}
+
+const pc = document.getElementById("lplot"), pctx = pc.getContext("2d");
+function fitPlot(){
+  const dpr = window.devicePixelRatio || 1;
+  pc.width = Math.round((pc.clientWidth || 400) * dpr); pc.height = Math.round((pc.clientHeight || 230) * dpr);
+}
+
+function drawPlot(){
+  const W = pc.width, H = pc.height, f = W / 420;
+  pctx.clearRect(0, 0, W, H);
+  // feste Achsen aus der Bahn (nicht aus den Messpunkten), damit eine konstante Grösse als flache Linie erscheint
+  const rP = sim.a * (1 - sim.e), rA = sim.a * (1 + sim.e);
+  const vP = Math.sqrt(GM * (2 / rP - 1 / sim.a)) * AU_PER_YR_IN_KMS;
+  const rows = [
+    { label: "Abstand r [AE]", max: rA * 1.1, col: "#232323", val: h => h[1] },
+    { label: "v⊥ [km/s]", max: vP * 1.1, col: "#1f4e79", val: h => h[2] },
+    { label: "r · v⊥ [AE · km/s]", max: rP * vP * 1.6, col: "#2e7d4f", val: h => h[1] * h[2] }
+  ];
+  const left = 8 * f, right = W - 8 * f, top = 6 * f, gap = 8 * f, rowH = (H - top - 18 * f - 2 * gap) / 3;
+  const X = t => left + (right - left) * Math.min(1, t / sim.T);
+  pctx.font = `${11 * f}px system-ui, sans-serif`; pctx.textBaseline = "top";
+  rows.forEach((row, i) => {
+    const y0 = top + i * (rowH + gap), yb = y0 + rowH;
+    const Y = v => yb - (rowH - 14 * f) * Math.min(1.05, v / row.max);
+    pctx.strokeStyle = "#d9d4ca"; pctx.lineWidth = 1 * f;
+    pctx.beginPath(); pctx.moveTo(left, yb); pctx.lineTo(right, yb); pctx.stroke();
+    pctx.fillStyle = row.col; pctx.textAlign = "left"; pctx.fillText(row.label, left, y0);
+    if (sim.hist.length > 1){
+      pctx.beginPath();
+      sim.hist.forEach((h, k) => { const px = X(h[0]), py = Y(row.val(h)); k ? pctx.lineTo(px, py) : pctx.moveTo(px, py); });
+      pctx.strokeStyle = row.col; pctx.lineWidth = 2.2 * f; pctx.stroke();
+      const h = sim.hist[sim.hist.length - 1];
+      pctx.beginPath(); pctx.arc(X(h[0]), Y(row.val(h)), 3.5 * f, 0, 2 * Math.PI); pctx.fillStyle = row.col; pctx.fill();
+    }
+  });
+  pctx.fillStyle = "#6b665e"; pctx.textBaseline = "bottom";
+  pctx.textAlign = "left"; pctx.fillText("0", left, H - 2 * f);
+  pctx.textAlign = "center"; pctx.fillText("Zeit t", (left + right) / 2, H - 2 * f);
+  pctx.textAlign = "right"; pctx.fillText("T (ein Umlauf)", right, H - 2 * f);
+}
+
+/* ============================================================
+   ZEICHNEN
+   ============================================================ */
+function fitCanvas(){
+  const dpr = window.devicePixelRatio || 1, w = cv.clientWidth || 600;
+  cv.width = Math.round(w * dpr); cv.height = Math.round(w * dpr);
+}
+function P(x, y){
+  const s = cv.width / (2 * sim.view.half);
+  return [cv.width / 2 + (x - sim.view.cx) * s, cv.height / 2 - (y - sim.view.cy) * s];
+}
+const F = () => cv.width / 900;
+
+function polyFill(pts, color){
+  ctx.beginPath();
+  const [sx, sy] = P(0, 0); ctx.moveTo(sx, sy);
+  pts.forEach(([x, y]) => { const [X, Y] = P(x, y); ctx.lineTo(X, Y); });
+  ctx.closePath(); ctx.fillStyle = color; ctx.fill();
+}
+
+function arrow(x0, y0, dx, dy, color, label){
+  const f = F(), len = Math.hypot(dx, dy);
+  if (len < 2) return;
+  const ux = dx / len, uy = dy / len, hl = 12 * f;
+  ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 3 * f;
+  ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x0 + dx - ux * hl * 0.6, y0 + dy - uy * hl * 0.6); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(x0 + dx, y0 + dy);
+  ctx.lineTo(x0 + dx - ux * hl - uy * hl * 0.5, y0 + dy - uy * hl + ux * hl * 0.5);
+  ctx.lineTo(x0 + dx - ux * hl + uy * hl * 0.5, y0 + dy - uy * hl - ux * hl * 0.5);
+  ctx.closePath(); ctx.fill();
+  if (label){ ctx.font = `600 ${Math.round(14 * f)}px Inter, system-ui, sans-serif`; ctx.fillText(label, x0 + dx + 6 * f, y0 + dy + 4 * f); }
+}
+
+function draw(){
+  const f = F();
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  ctx.fillStyle = "#fbfaf7"; ctx.fillRect(0, 0, cv.width, cv.height);
+
+  // Flächen
+  sim.sectors.forEach(sec => polyFill(sec.pts, sec.idx % 2 ? "rgba(211,154,28,.30)" : "rgba(31,78,121,.24)"));
+  if (sim.curPts.length > 1) polyFill(sim.curPts, "rgba(181,69,47,.16)");
+
+  // Bahnspur
+  ctx.beginPath();
+  sim.path.forEach(([x, y], i) => { const [X, Y] = P(x, y); i ? ctx.lineTo(X, Y) : ctx.moveTo(X, Y); });
+  ctx.strokeStyle = "#6b665e"; ctx.lineWidth = 1.5 * f; ctx.stroke();
+
+  // Nummern der Flächen
+  if ($("showNum").checked){
+    ctx.font = `600 ${Math.round(14 * f)}px Inter, system-ui, sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    sim.sectors.forEach(sec => {
+      const m = sec.pts[Math.floor(sec.pts.length / 2)];
+      const [X, Y] = P(m[0] * 0.62, m[1] * 0.62), [S0, S1] = P(0, 0);
+      const [A0, A1] = P(...sec.pts[0]), [B0, B1] = P(...sec.pts[sec.pts.length - 1]);
+      const width = Math.hypot(A0 - B0, A1 - B1);
+      if (width > 18 * f && Math.hypot(X - S0, Y - S1) > 16 * f){ ctx.fillStyle = "#232323"; ctx.fillText(String(sec.idx % sim.n + 1), X, Y); }
+    });
+    ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+  }
+
+  // Sonne
+  const [sx, sy] = P(0, 0);
+  ctx.beginPath(); ctx.arc(sx, sy, 11 * f, 0, 2 * Math.PI); ctx.fillStyle = "#e0a526"; ctx.fill();
+  ctx.strokeStyle = "#b8841a"; ctx.lineWidth = 1.5 * f; ctx.stroke();
+
+  // Planet + Pfeile
+  const [x, y, vx, vy] = sim.s, [px, py] = P(x, y);
+  const pix = cv.width / (2 * sim.view.half);
+  if ($("showF").checked){
+    const [ax, ay] = acceleration(x, y, vx, vy);
+    const aMag = Math.hypot(ax, ay), L = 70 * f;
+    arrow(px, py, ax / aMag * L, -ay / aMag * L, "#b5452f", "F");
+  }
+  if ($("showV").checked){
+    const vP = Math.sqrt(GM * (2 / (sim.a * (1 - sim.e)) - 1 / sim.a));
+    const L = 110 * f * Math.hypot(vx, vy) / vP;
+    const v = Math.hypot(vx, vy);
+    arrow(px, py, vx / v * L, -vy / v * L, "#1f4e79", "v");
+  }
+  ctx.beginPath(); ctx.arc(px, py, 8 * f, 0, 2 * Math.PI); ctx.fillStyle = "#1f4e79"; ctx.fill();
+  ctx.strokeStyle = "#fff"; ctx.lineWidth = 2 * f; ctx.stroke();
+
+  $("clock").textContent = `t = ${fmtTime(sim.t)} · Zeitabschnitt Δt = ${fmtTime(sim.tSec)}`;
+  $("scaleInfo").textContent = `Bildbreite ${(2 * sim.view.half).toLocaleString("de-CH", {maximumFractionDigits: 2})} AE`;
+}
+
+function fmtTime(t){
+  if (sim.T < 2) return `${(t * 365.25).toLocaleString("de-CH", {maximumFractionDigits: 1})} Tage`;
+  return `${t.toLocaleString("de-CH", {maximumFractionDigits: 2})} Jahre`;
+}
+
+/* ============================================================
+   TABELLE UND MESSWERTE
+   ============================================================ */
+function updateTable(){
+  const rows = sim.sectors.slice().reverse();
+  const mean = rows.length ? rows.reduce((s, r) => s + r.area, 0) / rows.length : 0;
+  const dec = mean < 0.1 ? 5 : mean < 10 ? 4 : 2;
+  $("secTable").innerHTML = `<tr><th>Fläche</th><th>Umlauf</th><th>Grösse [AE²]</th><th>Abweichung vom Mittel</th></tr>` +
+    (rows.length ? rows.map(r => `<tr><td><span class="sw" style="background:${r.idx % 2 ? "rgba(211,154,28,.6)" : "rgba(31,78,121,.5)"}"></span>Nr. ${r.idx % sim.n + 1}</td><td>${Math.floor(r.idx / sim.n) + 1}</td>
+      <td>${r.area.toFixed(dec)}</td><td>${pct(mean ? (r.area - mean) / mean * 100 : 0)}</td></tr>`).join("")
+      : `<tr><td colspan="4" style="text-align:left;color:var(--muted)">Die erste Fläche ist fertig nach einem Zeitabschnitt.</td></tr>`);
+  const b = sim.a * Math.sqrt(1 - sim.e * sim.e);
+  $("secNote").textContent = `Zum Vergleich: Ellipsenfläche π·a·b geteilt durch ${sim.n} = ${(Math.PI * sim.a * b / sim.n).toFixed(dec)} AE². Nach ${sim.n} Flächen ist ein Umlauf vorbei, die Nummerierung beginnt wieder bei 1 (wie die Monate eines Jahres).`;
+}
+
+function pct(x){ const t = x.toFixed(2); return (t === "-0.00" ? "0.00" : t) + " %"; }
+
+function updateData(){
+  const [x, y, vx, vy] = sim.s;
+  const r = Math.hypot(x, y), v = Math.hypot(vx, vy);
+  const rP = sim.a * (1 - sim.e), rA = sim.a * (1 + sim.e);
+  const vP = Math.sqrt(GM * (2 / rP - 1 / sim.a)), vA = vP * rP / rA;
+  const kms = u => (u * AU_PER_YR_IN_KMS).toLocaleString("de-CH", {maximumFractionDigits: 2}) + " km/s";
+  const au = u => u.toLocaleString("de-CH", {maximumFractionDigits: 4}) + " AE";
+  const items = [
+    ["Abstand zur Sonne r", au(r)],
+    ["Geschwindigkeit v", kms(v)],
+    ["Umlaufzeit T", fmtTime(sim.T)],
+    ["im Perihel: r_P, v_P", `${au(rP)}, ${kms(vP)}`],
+    ["im Aphel: r_A, v_A", `${au(rA)}, ${kms(vA)}`],
+    ["v_P / v_A", (vP / vA).toFixed(3)],
+    ["r_A / r_P", (rA / rP).toFixed(3)]
+  ];
+  $("data").innerHTML = items.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("");
+  // Flächengeschwindigkeit: jetzt gemessen und theoretisch
+  const vPerp = Math.abs(x * vy - y * vx) / r;
+  const rate = 0.5 * r * vPerp, theory = Math.PI * sim.a * sim.a * Math.sqrt(1 - sim.e * sim.e) / sim.T;
+  const f4 = u => u.toLocaleString("de-CH", {minimumFractionDigits: 4, maximumFractionDigits: 4});
+  $("lawData").innerHTML = [
+    ["r jetzt", au(r)],
+    ["v⊥ jetzt", `${f4(vPerp)} AE/Jahr (${kms(vPerp)})`],
+    ["½ · r · v⊥ jetzt", f4(rate) + " AE²/Jahr"],
+    ["π·a·b / T (ganze Ellipse pro Umlauf)", f4(theory) + " AE²/Jahr"]
+  ].map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("");
+}
+
+/* ============================================================
+   BEDIENUNG
+   ============================================================ */
+const aIn = $("aIn"), eIn = $("eIn"), nIn = $("nIn"), spdIn = $("spdIn");
+
+function buildPresets(){
+  $("presets").innerHTML = PRESETS.map((p, i) => `<button data-i="${i}">${p.name}</button>`).join("");
+  $("presets").querySelectorAll("button").forEach(b => b.onclick = () => selectPreset(+b.dataset.i));
+}
+function selectPreset(i){
+  const p = PRESETS[i];
+  sim.a = p.a; sim.e = p.e;
+  aIn.value = p.a; eIn.value = p.e;
+  $("presets").querySelectorAll("button").forEach(b => b.classList.toggle("sel", +b.dataset.i === i));
+  showValues(); resetSim();
+}
+function markCustom(){
+  $("presets").querySelectorAll("button").forEach(b => b.classList.toggle("sel", +b.dataset.i === PRESETS.length - 1));
+}
+function showValues(){
+  $("aOut").textContent = (+aIn.value).toFixed(2) + " AE";
+  $("eOut").textContent = (+eIn.value).toFixed(3);
+  $("nOut").textContent = nIn.value;
+  $("spdOut").textContent = spdIn.value + " s";
+}
+aIn.oninput = () => { sim.a = +aIn.value; markCustom(); showValues(); resetSim(); };
+eIn.oninput = () => { sim.e = +eIn.value; markCustom(); showValues(); resetSim(); };
+nIn.oninput = () => { sim.n = +nIn.value; showValues(); resetSim(); };
+spdIn.oninput = () => { sim.secondsPerOrbit = +spdIn.value; showValues(); };
+$("playBtn").onclick = () => {
+  if (sim.orbitDone){ sim.orbitDone = false; sim.running = true; $("orbitMsg").textContent = ""; sim.hist = []; sim.histT0 = sim.t; recordHist(); }
+  else sim.running = !sim.running;
+  $("playBtn").textContent = sim.running ? "Pause" : "Weiter";
+};
+$("resetBtn").onclick = () => resetSim();
+window.addEventListener("resize", () => { fitCanvas(); fitPlot(); });
+
+/* ============================================================
+   KI-TUTOR
+   ============================================================ */
+// Variante A: eigener Chat über die Web-App der gemeinsamen Tabelle (Code.gs).
+const BACKEND_URL = "";
+// Variante B: geteilter Link eines fobizz-KI-Assistenten, wird hier eingebettet.
+// Ist FOBIZZ_URL gesetzt, gilt Variante B. Sind beide leer, ist der Tutor ausgeschaltet.
+const FOBIZZ_URL = "";
+const ROOM = (new URLSearchParams(location.search).get("klasse") || "klasse").replace(/[^\w-]/g, "").slice(0, 30) || "klasse";
+let chat = [], busy = false;
+
+// Was der Tutor über die Simulation erfährt (kurz, ohne Personendaten)
+function simState(){
+  const [x, y, vx, vy] = sim.s, r = Math.hypot(x, y), vPerp = Math.abs(x * vy - y * vx) / r;
+  const sel = document.querySelector("#presets button.sel");
+  const f = (u, d = 4) => u.toFixed(d);
+  return [
+    `Himmelskörper: ${sel ? sel.textContent : "Eigene Bahn"}`,
+    `a = ${f(sim.a, 3)} AE, e = ${f(sim.e, 3)}, Flächen pro Umlauf: ${sim.n}`,
+    `jetzt: r = ${f(r)} AE, v⊥ = ${f(vPerp)} AE/Jahr, ½·r·v⊥ = ${f(0.5 * r * vPerp)} AE²/Jahr`,
+    `Perihel r_P = ${f(sim.a * (1 - sim.e))} AE, Aphel r_A = ${f(sim.a * (1 + sim.e))} AE`,
+    `fertige Umläufe: ${Math.floor(sim.totalSectors / sim.n)}, Simulation ${sim.orbitDone ? "angehalten nach einem Umlauf" : sim.running ? "läuft" : "pausiert"}`
+  ].join("; ");
+}
+
+const escHtml = t => String(t).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+function fmtMsg(t){ return escHtml(t).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/\n/g, "<br>"); }
+
+function renderChat(extra){
+  $("chatLog").innerHTML = chat.map(m => `<div class="msg ${m.role === "user" ? "user" : "tutor"}">${fmtMsg(m.content)}</div>`).join("")
+    + (extra || "");
+  $("chatLog").scrollTop = $("chatLog").scrollHeight;
+}
+
+async function askTutor(){
+  busy = true; $("sendBtn").disabled = true;
+  renderChat(`<div class="msg tutor"><span class="note" style="margin:0">Der Tutor denkt nach …</span></div>`);
+  try {
+    // text/plain vermeidet eine CORS-Vorabanfrage, die Apps Script nicht beantwortet
+    const res = await fetch(BACKEND_URL, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ kind: "tutor", room: ROOM, messages: chat.slice(-16), state: simState() }) });
+    const d = await res.json();
+    if (d.error) throw new Error(d.error);
+    chat.push({ role: "assistant", content: d.reply });
+    renderChat();
+  } catch (err){
+    renderChat(`<div class="msg err">${escHtml(err.message || "Keine Verbindung zum Tutor.")}</div>`);
+  }
+  busy = false; $("sendBtn").disabled = false; $("chatIn").focus();
+}
+
+function startChat(){
+  chat = [{ role: "user", content: "Hallo!" }];
+  $("chatStart").hidden = true; $("chatForm").hidden = false;
+  askTutor();
+}
+
+function setupTutor(){
+  if (FOBIZZ_URL){
+    // fobizz läuft in einem eingebetteten Fenster: Es sieht die Werte der Simulation nicht
+    $("stateNote").hidden = true;
+    $("chatForm").hidden = true;
+    $("startBtn").textContent = "Tutor öffnen";
+    $("tutorLink").href = FOBIZZ_URL;
+    $("startBtn").onclick = () => {
+      $("tutorFrame").src = FOBIZZ_URL;
+      $("chatStart").hidden = true; $("chatLog").hidden = true; $("embedWrap").hidden = false;
+    };
+    return;
+  }
+  if (!BACKEND_URL){
+    $("startBtn").disabled = true;
+    $("chatInfo").textContent = "Der Tutor ist noch nicht verbunden.";
+  }
+  $("startBtn").onclick = startChat;
+  $("newChatBtn").onclick = () => { if (!busy) startChat(); };
+  $("chatForm").onsubmit = ev => {
+    ev.preventDefault();
+    const t = $("chatIn").value.trim();
+    if (!t || busy) return;
+    chat.push({ role: "user", content: t.slice(0, 800) });
+    $("chatIn").value = "";
+    askTutor();
+  };
+  // Enter sendet, Umschalt+Enter macht eine neue Zeile
+  $("chatIn").addEventListener("keydown", ev => {
+    if (ev.key === "Enter" && !ev.shiftKey){ ev.preventDefault(); $("chatForm").requestSubmit(); }
+  });
+}
+
+/* ============================================================
+   SELBSTTEST gegen die Kontrollwerte (Python, analytisch π·a·b/12)
+   ============================================================ */
+function selfTest(){
+  const ref = [["Erde", 1.0, 0.0167, 0.26176], ["Mars", 1.524, 0.0934, 0.60539], ["Merkur", 0.387, 0.2056, 0.03837], ["Halley", 17.83, 0.967, 21.20462]];
+  const rows = ref.map(([n, a, e, A]) => {
+    const { areas } = simulateAreas(a, e, 12);
+    const dev = Math.max(...areas.map(x => Math.abs(x - A) / A * 100));
+    return { Objekt: n, "Fläche JS": +areas[0].toFixed(5), Referenz: A, "max. Abweichung %": +dev.toFixed(4), OK: dev < 0.01 };
+  });
+  console.table(rows);
+  if (rows.some(r => !r.OK)) console.warn("Selbsttest: Abweichung von kepler2.py!");
+}
+
+/* ============================================================
+   START
+   ============================================================ */
+buildPresets();
+nIn.value = 12; spdIn.value = 10;
+selectPreset(4);
+setupTutor();
+fitCanvas(); fitPlot();
+selfTest();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

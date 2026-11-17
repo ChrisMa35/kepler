@@ -1,0 +1,891 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Newtons Kanone</title>
+<!--
+  Newtons Kanone: interaktive Übung zum Arbeitsblatt «Vom Apfel zu den Planetenbahnen».
+  Physik: waagrechter Schuss vom Gipfel von «Newtons Berg» (200 km hoch, über der Atmosphäre), ohne Luft.
+  Bahn: r(θ) = r0·λ / (1 + (λ − 1)·cos θ), λ = v0²·r0 / GM (Kegelschnitt, Erdmittelpunkt im Brennpunkt).
+  Animation: dθ/dt = h / r², h = r0·v0 (Drehimpulserhaltung, 2. Keplersches Gesetz).
+  Die Physik-Funktionen entsprechen eins zu eins cannone.py (Python-Referenz).
+-->
+<style>
+  :root{
+    --bg:#f6f4ef; --panel:#ffffff; --ink:#232323; --muted:#6b665e; --line:#d9d4ca;
+    --accent:#1f4e79; --shot:#b5452f; --ghost:#a9a39a; --earth:#cfe3f5; --earth-edge:#8fb6da;
+    --ok:#2f7d32; --soft:#f1ede4; --okbg:#e5f2e6; --badbg:#f8e7e2; --tool:#eef3f8;
+  }
+  /* Bewusst nur ein (helles) Farbschema: Papier-Look passend zum Arbeitsblatt */
+  *{box-sizing:border-box}
+  [hidden]{display:none!important}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 Inter,system-ui,-apple-system,"Segoe UI",sans-serif;color-scheme:light}
+  header{display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding:12px max(16px, env(safe-area-inset-right, 0px)) 12px max(16px, env(safe-area-inset-left, 0px));background:var(--panel);border-bottom:1px solid var(--line)}
+  header h1{font-size:19px;margin:0}
+  .levels{display:flex;gap:6px;margin-left:auto;flex-wrap:wrap}
+  .lv{font-size:12px;font-weight:600;line-height:1;padding:6px 9px;border-radius:12px;background:var(--soft);color:var(--muted)}
+  .lv.on{background:var(--accent);color:#fff}
+  .lv.done{background:#dfe9f3;color:var(--accent)}
+  main{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:16px;padding:16px max(16px, env(safe-area-inset-right, 0px)) 16px max(16px, env(safe-area-inset-left, 0px));max-width:1320px;margin:0 auto}
+  @media (max-width:880px){main{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;min-width:0}
+  #stage{position:relative;padding:0;overflow:hidden;align-self:start}
+  canvas{display:block;width:100%;height:auto;aspect-ratio:1/1;max-width:100%}
+  .overlay{position:absolute;left:10px;top:10px;font-size:12px;color:var(--muted);background:rgba(255,255,255,.88);padding:4px 8px;border-radius:6px}
+  .overlay2{position:absolute;right:10px;top:10px;font-size:12px;color:var(--muted);background:rgba(255,255,255,.88);padding:4px 8px;border-radius:6px;text-align:right}
+  h2{font-size:17px;margin:0 0 6px;text-wrap:balance}
+  .mission{margin:0 0 8px}
+  .step{font-size:11px;font-weight:700;line-height:1;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:14px 0 6px}
+  .tool{background:var(--tool);border-radius:8px;padding:10px 12px;font-size:14px}
+  .tool dl{display:grid;grid-template-columns:auto 1fr;gap:2px 10px;margin:0 0 6px}
+  .tool dt{color:var(--muted)}
+  .tool dd{margin:0;font-variant-numeric:tabular-nums}
+  .tips{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+  .tiptext{margin-top:6px;padding:6px 8px;background:#fff;border-radius:6px;display:none}
+  .formula{font-size:15px;font-weight:600;white-space:nowrap;overflow-x:auto;display:block;margin:2px 0 4px}
+  .predict{display:flex;gap:6px;flex-wrap:wrap}
+  button{font:inherit;font-weight:600;font-size:14px;line-height:1;border-radius:8px;border:1.5px solid var(--ink);background:#fff;color:var(--ink);padding:9px 12px;cursor:pointer}
+  button:hover:not(:disabled){background:var(--soft)}
+  button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:3px solid #8fb6da;outline-offset:2px}
+  button:disabled{opacity:.4;cursor:not-allowed}
+  button.sel,button.sel:hover:not(:disabled){background:var(--accent);border-color:var(--accent);color:#fff}
+  button.small{font-size:12.5px;padding:6px 9px}
+  button.primary{background:var(--shot);border-color:var(--shot);color:#fff;font-size:16px;padding:11px 18px}
+  button.primary:hover:not(:disabled){background:#9a3824}
+  .hint{font-size:13px;color:var(--muted)}
+  .speed{display:flex;align-items:center;gap:10px}
+  .speed input[type=range]{flex:1;min-width:0;accent-color:var(--shot)}
+  .speed input[type=number]{width:96px;font:inherit;font-weight:600;padding:6px;border:1.5px solid var(--line);border-radius:6px;text-align:right}
+  .mach{font-size:13px;color:var(--muted);margin-top:4px}
+  .fire{display:flex;align-items:center;gap:12px;margin-top:12px}
+  .shots{display:flex;gap:5px}
+  .shot{width:13px;height:13px;border-radius:50%;background:var(--shot)}
+  .shot.used{background:var(--line)}
+  #feedback{margin-top:12px;padding:10px 12px;border-radius:8px;background:var(--soft);min-height:44px}
+  #feedback.ok{background:var(--okbg)}
+  #feedback.bad{background:var(--badbg)}
+  #history{margin:8px 0 0;padding-left:18px;font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+  textarea{width:100%;min-height:58px;font:inherit;border:1.5px solid var(--line);border-radius:8px;padding:8px}
+  .stars{font-size:22px;letter-spacing:2px;color:#d39a1c}
+  #scale svg{width:100%;height:auto;display:block}
+  /* Auswertung */
+  #summary{max-width:1320px;margin:0 auto;padding:16px max(16px, env(safe-area-inset-right, 0px)) 16px max(16px, env(safe-area-inset-left, 0px))}
+  .sumgrid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media (max-width:880px){.sumgrid{grid-template-columns:1fr}}
+  .newton{aspect-ratio:1/1;max-width:100%;display:grid;place-items:center;background:var(--soft);border:1px dashed var(--muted);border-radius:8px;color:var(--muted);text-align:center;padding:12px;overflow:hidden}
+  .newton img{max-width:100%;max-height:100%}
+  .tablewrap{overflow-x:auto}
+  table{border-collapse:collapse;width:100%;margin-top:8px;font-size:14px}
+  th,td{border:1px solid var(--line);padding:7px 8px;text-align:left;vertical-align:top}
+  th{background:var(--soft)}
+  select{font:inherit;padding:4px}
+  td.r{background:var(--okbg)} td.w{background:var(--badbg)}
+  .answers{display:grid;gap:10px;margin-top:6px}
+  .ans{border:1px solid var(--line);border-radius:8px;padding:10px 12px}
+  .ans .q{font-weight:600}
+  .ans .mine{color:var(--muted);margin:4px 0}
+  .ans .model{background:var(--okbg);border-radius:6px;padding:6px 8px;display:none}
+  .score{border:2px solid var(--accent);border-radius:10px;padding:12px 14px;margin-top:14px}
+  .score .big{font-size:30px;font-weight:700;color:var(--accent);font-variant-numeric:tabular-nums}
+  .score table td:last-child,.score table th:last-child{text-align:right;font-variant-numeric:tabular-nums}
+  .selfrate{display:none;gap:6px;flex-wrap:wrap;margin-top:6px;align-items:center}
+  .pts{font-size:13px;color:var(--muted);margin-top:4px;font-variant-numeric:tabular-nums}
+  button.used{background:var(--soft);color:var(--muted)}
+  footer{max-width:1320px;margin:0 auto;padding:4px max(16px, env(safe-area-inset-right, 0px)) 20px max(16px, env(safe-area-inset-left, 0px));font-size:12px;color:var(--muted)}
+  @media (prefers-reduced-motion: reduce){*{scroll-behavior:auto}}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Newtons Kanone</h1>
+  <span class="hint">Waagrechter Schuss von Newtons Berg (200 km hoch, über der Atmosphäre), ohne Luftwiderstand</span>
+  <div class="levels" id="levelDots"></div>
+</header>
+
+<main id="game">
+  <div class="card" id="stage">
+    <canvas id="cv" width="900" height="900" aria-label="Spielfeld mit Erde, Berg und Flugbahnen"></canvas>
+    <div class="overlay" id="viewInfo"></div>
+    <div class="overlay2" id="timeInfo"></div>
+  </div>
+
+  <div class="card">
+    <h2 id="lvTitle"></h2>
+    <p class="mission" id="lvMission"></p>
+
+    <div id="play">
+      <div class="step">1 · Rechnen</div>
+      <div class="tool" id="toolBox"></div>
+
+      <div class="step">2 · Vorhersage</div>
+      <div id="predictBox"></div>
+
+      <div class="step">3 · Abschussgeschwindigkeit</div>
+      <div class="speed">
+        <input type="range" id="vRange" aria-label="Abschussgeschwindigkeit">
+        <input type="number" id="vNum" aria-label="Abschussgeschwindigkeit in km/s"> <span>km/s</span>
+      </div>
+      <div class="mach" id="mach"></div>
+      <div id="scale" aria-hidden="true"></div>
+
+      <div class="fire">
+        <button class="primary" id="fireBtn" disabled>Feuer!</button>
+        <div class="shots" id="shots" aria-label="verbleibende Schüsse"></div>
+      </div>
+      <div id="feedback" aria-live="polite">Rechne zuerst und mach dann deine Vorhersage.</div>
+      <ol id="history"></ol>
+    </div>
+
+    <div id="reflect" hidden>
+      <div class="step">Auswertung</div>
+      <div id="result"></div>
+      <div class="step">Kurz nachdenken</div>
+      <p id="question" style="margin:0 0 6px"></p>
+      <textarea id="answer" placeholder="Deine Antwort in einem Satz"></textarea>
+      <div style="margin-top:10px"><button class="primary" id="nextBtn">Weiter</button></div>
+    </div>
+  </div>
+</main>
+
+<section id="summary" hidden>
+  <div class="card">
+    <h2>Geschafft: Du hast Newtons Gedankenexperiment nachgebaut!</h2>
+    <p class="hint" style="margin-top:0">Links deine Bahnen, rechts Newtons eigene Abbildung.</p>
+    <div class="sumgrid">
+      <canvas id="cvSum" width="900" height="900" aria-label="Alle deine Bahnen"></canvas>
+      <div class="newton" id="newtonBox">
+        <img id="newtonImg" src="newton_kanone.png" alt="Newtons Abbildung der Kanonenkugel-Bahnen, aus A Treatise of the System of the World (1728)">
+      </div>
+    </div>
+
+    <div class="step">Tabelle der Bahnen</div>
+    <p class="hint" style="margin:0">Fülle für jede deiner Bahnen die Spalten aus und klicke auf «Prüfen».</p>
+    <div class="tablewrap"><table id="sumTable"></table></div>
+    <div style="margin-top:10px"><button class="primary" id="checkBtn">Prüfen</button> <span id="checkMsg" class="hint"></span></div>
+
+    <div class="step">Deine Antworten und die Musterlösungen</div>
+    <div class="answers" id="answers"></div>
+    <div style="margin-top:10px"><button id="showModel">Musterlösungen anzeigen</button>
+      <span class="hint">Danach: Bewerte jede deiner Antworten selbst.</span></div>
+
+    <div class="score" id="scoreCard" aria-live="polite"></div>
+  </div>
+</section>
+
+<footer>Zeitraffer: die Animation läuft stark beschleunigt. Die Kugel bewegt sich trotzdem physikalisch richtig: in Erdnähe schneller, weit weg langsamer.</footer>
+
+<script>
+"use strict";
+/* ============================================================
+   PHYSIK  (entspricht cannone.py, SI-Einheiten)
+   ============================================================ */
+const GM = 3.986004418e14;      // m^3/s^2
+const R_EARTH = 6.371e6;        // m
+const H_MOUNTAIN = 200e3;       // m: Newtons Berg, über der Atmosphäre
+const R_LAUNCH = R_EARTH + H_MOUNTAIN;
+const V_CIRC = Math.sqrt(GM / R_LAUNCH);
+const V_ESC = Math.sqrt(2 * GM / R_LAUNCH);
+const G_TOP = GM / (R_LAUNCH * R_LAUNCH);   // Fallbeschleunigung auf dem Gipfel
+const V_SOUND = 343;            // m/s, Luft bei 20 °C
+
+function lam(v0){ return v0 * v0 * R_LAUNCH / GM; }
+
+function rOfTheta(theta, v0){
+  const L = lam(v0);
+  return R_LAUNCH * L / (1 + (L - 1) * Math.cos(theta));
+}
+
+function thetaImpact(v0){
+  const L = lam(v0);
+  if (L === 1) return null;
+  const c = (R_LAUNCH * L / R_EARTH - 1) / (L - 1);
+  if (Math.abs(c) > 1) return null;
+  const th = Math.acos(c);
+  return L < 1 ? th : null;
+}
+
+function thetaMax(v0){
+  const L = lam(v0);
+  const th = thetaImpact(v0);
+  if (th !== null) return th;
+  if (L < 2) return 2 * Math.PI;
+  return Math.acos(-1 / (L - 1)) * 0.98;
+}
+
+function outcome(v0){
+  const L = lam(v0);
+  if (thetaImpact(v0) !== null) return "Absturz";
+  return L < 2 ? "Umlaufbahn" : "Fluchtbahn";
+}
+
+function thetaStep(theta, v0, dt){
+  const h = R_LAUNCH * v0;
+  const r = rOfTheta(theta, v0);
+  return theta + h / (r * r) * dt;
+}
+
+/* Bahngrössen (Ellipse): Perigäum, Apogäum, grosse Halbachse, Exzentrizität */
+function orbitData(v0){
+  const L = lam(v0), r1 = R_LAUNCH, r2 = rOfTheta(Math.PI, v0);
+  return { e: Math.abs(L - 1), rP: Math.min(r1, r2), rA: Math.max(r1, r2), a: (r1 + r2) / 2 };
+}
+
+// Polarkoordinaten -> kartesisch: Abschuss oben (y-Achse), nach rechts
+function toXY(theta, r){ return [r * Math.sin(theta), r * Math.cos(theta)]; }
+
+function samplePath(v0, n = 700){
+  const thEnd = thetaMax(v0), pts = [];
+  for (let i = 0; i <= n; i++){
+    const th = thEnd * i / n;
+    const r = rOfTheta(th, v0);
+    if (r > 40 * R_EARTH) break;
+    pts.push(toXY(th, r));
+  }
+  return pts;
+}
+
+/* ============================================================
+   LEVELS
+   ============================================================ */
+const KM = 1000;
+const fmtKm = m => (m / KM).toLocaleString("de-CH", { maximumFractionDigits: 0 }) + " km";
+
+// Zusätzlicher Zeitraffer für alle Level (1 = ursprüngliche Geschwindigkeit)
+const SPEEDUP = 3;
+
+const LEVELS = [
+  {
+    id: 1, name: "Eine Parabel",
+    mission: "Triff die Zielscheibe auf dem Boden, 200 km vom Berg entfernt.",
+    type: "ring-ground", targetS: 200 * KM, tol: 10 * KM,
+    vmin: 0, vmax: 2, step: 0.01, correct: 968.2,
+    view: { cx: 110 * KM, cy: R_EARTH + 95 * KM, w: 300 * KM },
+    timeScale: 60,
+    given: [["Höhe des Gipfels", "h = 200 km"], ["Fallbeschleunigung oben", `g = ${G_TOP.toFixed(2)} m/s²`], ["Abstand zum Ziel", "s = 200 km"]],
+    wanted: "Abschussgeschwindigkeit v₀",
+    tips: ["Waagrechter Wurf: Die Fallzeit hängt nur von der Höhe ab, nicht von v₀.",
+           "<span class='formula'>t = √(2h / g) &nbsp;und&nbsp; s = v₀ · t &nbsp;⇒&nbsp; v₀ = s / √(2h / g)</span>Die Erde ist hier noch fast flach: die Näherung reicht für einen Treffer."],
+    predict: ["zu kurz", "Treffer", "zu weit"],
+    question: "Welche Kraft wirkt auf die Kugel, nachdem sie das Rohr verlassen hat?",
+    model: "Nur die Gravitation (Gewichtskraft), immer zum Erdmittelpunkt gerichtet. Nach vorne wirkt keine Kraft mehr: Die Kugel behält ihre waagrechte Geschwindigkeit, und gleichzeitig fällt sie."
+  },
+  {
+    id: 2, name: "Die Kugel fällt und fällt",
+    mission: "Bring die Kugel auf eine Kreisbahn: Sie soll in gleicher Höhe einmal ganz um die Erde fliegen.",
+    type: "threshold-orbit",
+    vmin: 0.97, vmax: 9, step: 0.01, correct: V_CIRC,
+    view: { cx: 0, cy: 0, w: 2.6 * R_EARTH },
+    timeScale: 1500,
+    given: [["GM der Erde", "3.986 · 10¹⁴ m³/s²"], ["Abstand vom Erdmittelpunkt", "r₀ = R + h = 6571 km"]],
+    wanted: "v₀ für eine Kreisbahn mit Radius r₀",
+    tips: ["Auf der Kreisbahn liefert die Gravitation genau die nötige Zentripetalkraft.",
+           "<span class='formula'>m v₀² / r₀ = G M m / r₀² &nbsp;⇒&nbsp; v₀ = √(GM / r₀)</span>Je weiter weg, desto langsamer: v ∝ r<sup>−1/2</sup>."],
+    predict: ["Absturz", "Umlaufbahn", "Fluchtbahn"],
+    question: "Fällt die Kugel auf der Kreisbahn noch? Begründe in einem Satz.",
+    model: "Ja: Sie fällt ständig zum Erdmittelpunkt, aber die Erdoberfläche krümmt sich unter ihr genauso schnell weg. Die Gravitation liefert genau die Zentripetalkraft, m v²/r = G M m/r²."
+  },
+  {
+    id: 3, name: "Eine Ellipse",
+    mission: "Triff die Zielscheibe auf der anderen Seite der Erde, 2000 km über dem Boden.",
+    type: "ring-apogee", targetR: R_EARTH + 2000 * KM, tol: 300 * KM,
+    vmin: 7.79, vmax: 10, step: 0.01, correct: 8244.3,
+    view: { cx: 0, cy: -900 * KM, w: 2.85 * R_EARTH },
+    timeScale: 1800,
+    given: [["GM der Erde", "3.986 · 10¹⁴ m³/s²"], ["Abschuss = Perigäum", "r_P = r₀ = 6571 km"], ["Ziel = Apogäum", "r_A = 6371 km + 2000 km = 8371 km"]],
+    wanted: "v₀, damit die Ellipse genau bis r_A reicht",
+    tips: ["Zwei Erhaltungssätze: Energie und Drehimpuls. Im Perigäum und im Apogäum steht v senkrecht auf r. Die grosse Halbachse ist a = (r_P + r_A) / 2.",
+           "<span class='formula'>r_P v₀ = r_A v_A &nbsp;und&nbsp; ½v₀² − GM/r_P = ½v_A² − GM/r_A</span><span class='formula'>⇒ v₀ = √( 2GM · r_A / (r_P (r_P + r_A)) )</span>"],
+    predict: ["zu tief", "Treffer", "zu hoch"],
+    question: "Wo ist die Kugel auf ihrer Bahn am schnellsten, wo am langsamsten? Warum?",
+    model: "Am schnellsten im Perigäum (am Abschusspunkt, nahe an der Erde), am langsamsten im Apogäum (gegenüber, weit weg). Der Drehimpuls bleibt erhalten: r_P · v_P = r_A · v_A."
+  },
+  {
+    id: 4, name: "Auf Nimmerwiedersehen",
+    mission: "Die Kugel soll die Erde für immer verlassen, mit möglichst kleiner Geschwindigkeit.",
+    type: "threshold-escape",
+    vmin: 8.24, vmax: 14, step: 0.01, correct: V_ESC,
+    view: { cx: 1.6 * R_EARTH, cy: -1.6 * R_EARTH, w: 7 * R_EARTH },
+    timeScale: 2000,
+    given: [["GM der Erde", "3.986 · 10¹⁴ m³/s²"], ["Abstand vom Erdmittelpunkt", "r₀ = 6571 km"], ["Kreisbahn (Level 2)", "v_K = 7.79 km/s"]],
+    wanted: "kleinste v₀, mit der die Kugel nie zurückkommt",
+    tips: ["Die Kugel entkommt, wenn ihre Bewegungsenergie reicht, um «unendlich weit» zu kommen. Dort ist die potentielle Energie null.",
+           "<span class='formula'>½v₀² − GM/r₀ = 0 &nbsp;⇒&nbsp; v₀ = √(2GM / r₀) = √2 · v_K</span>Vergleiche mit deinem Ergebnis aus Level 2!"],
+    predict: ["Absturz", "Umlaufbahn", "Fluchtbahn"],
+    question: "Was unterscheidet diese Bahn von allen vorherigen? Um welchen Faktor ist v_F grösser als v_K?",
+    model: "Die Bahn ist offen: Die Kugel kehrt nie zurück (genau bei v_F eine Parabel, darüber eine Hyperbel). Die Bewegungsenergie reicht, um der Gravitation ganz zu entkommen. v_F = √2 · v_K ≈ 1.41 · 7.79 km/s ≈ 11.01 km/s."
+  }
+];
+const FINAL_Q = "Was zeigt deine Abbildung, das bei Newton fehlt?";
+const FINAL_MODEL = "Zum Beispiel die Fluchtbahn: eine offene Bahn, auf der die Kugel die Erde für immer verlässt. (Vergleiche genau mit Newtons Abbildung.)";
+const SHOTS_PER_LEVEL = 3;
+
+/* Referenzgeschwindigkeiten (gerundet), logarithmische Skala */
+const REFS = [
+  { v: 33,    label: "Auto (120 km/h)", icon: "car" },
+  { v: 250,   label: "Flugzeug", icon: "plane" },
+  { v: 343,   label: "Schall", icon: "sound" },
+  { v: 900,   label: "Gewehrkugel", icon: "bullet" },
+  { v: 7660,  label: "ISS", icon: "iss" },
+  { v: 29800, label: "Erde um die Sonne", icon: "sun" }
+];
+
+/* ============================================================
+   ZUSTAND
+   ============================================================ */
+const state = { li: 0, shots: [], prediction: null, anim: null, finished: false, records: [], answers: [],
+                tips: 0, predOK: 0, stats: [], tableRight: 0, tableChecked: false, selfRates: [] };
+
+/* Punkte */
+const PTS = { star: 10, eff: [10, 5, 0], predMax: 6, tip: [0, 3, 10], cell: 2, self: { richtig: 4, teilweise: 2, falsch: 0 } };
+
+/* ============================================================
+   ZEICHNEN
+   ============================================================ */
+const cv = document.getElementById("cv");
+const ctx = cv.getContext("2d");
+
+function fitCanvas(c){
+  const dpr = window.devicePixelRatio || 1;
+  const w = c.clientWidth || 600;
+  c.width = Math.round(w * dpr); c.height = Math.round(w * dpr);
+}
+function makeView(c, v){
+  const s = c.width / v.w;
+  return {
+    s,
+    px: (x, y) => [c.width / 2 + (x - v.cx) * s, c.height / 2 - (y - v.cy) * s],
+    m: (X, Y) => [v.cx + (X - c.width / 2) / s, v.cy - (Y - c.height / 2) / s]
+  };
+}
+const F = c => c.width / 900;   // Skalierung für Linien und Schrift
+
+function label(g, c, text, X, Y, color = "#4a4640", align = "left", weight = 500){
+  g.font = `${weight} ${Math.round(15 * F(c))}px Inter, system-ui, sans-serif`;
+  g.textAlign = align; g.textBaseline = "middle";
+  const w = g.measureText(text).width, pad = 4 * F(c), hgt = 20 * F(c);
+  const x0 = align === "left" ? X : align === "right" ? X - w : X - w / 2;
+  g.fillStyle = "rgba(255,255,255,.85)"; g.fillRect(x0 - pad, Y - hgt / 2, w + 2 * pad, hgt);
+  g.fillStyle = color; g.fillText(text, X, Y);
+  g.textAlign = "left";
+}
+
+function drawScene(c, g, level, opts = {}){
+  const V = makeView(c, level.view), f = F(c);
+  g.clearRect(0, 0, c.width, c.height);
+  g.fillStyle = "#fbfaf7"; g.fillRect(0, 0, c.width, c.height);
+
+  // Erde
+  const [ex, ey] = V.px(0, 0);
+  g.beginPath(); g.arc(ex, ey, R_EARTH * V.s, 0, 2 * Math.PI);
+  g.fillStyle = "#cfe3f5"; g.fill();
+  g.lineWidth = 1.5 * f; g.strokeStyle = "#8fb6da"; g.stroke();
+
+  // Berg massstabsgetreu (schlanker Kegel, Breite unten 0.3 · Höhe)
+  const half = 0.15 * H_MOUNTAIN / R_EARTH;
+  const [lx, ly] = V.px(...toXY(-half, R_EARTH)), [rx, ry] = V.px(...toXY(half, R_EARTH));
+  const [tx, ty] = V.px(0, R_LAUNCH);
+  g.beginPath(); g.moveTo(lx, ly); g.lineTo(tx, ty); g.lineTo(rx, ry); g.closePath();
+  g.fillStyle = "#8a8278"; g.fill();
+  // Kanone auf dem Gipfel (Mindestgrösse, damit sichtbar)
+  const k = Math.max(5 * f, 0);
+  g.fillStyle = "#232323"; g.fillRect(tx - k * 0.4, ty - k * 0.9, k * 2.2, k * 0.9);
+  if (!opts.noLabels) label(g, c, "Newtons Berg, 200 km", tx + 14 * f, ty - 16 * f, "#4a4640", "left");
+
+  // Ziel
+  if (level.type === "ring-ground"){
+    const p = toXY(level.targetS / R_EARTH, R_EARTH);
+    drawTarget(g, V, p, level.tol, c);
+    const [X, Y] = V.px(...p);
+    if (!opts.noLabels) label(g, c, "Ziel: 200 km", X, Y + 26 * f, "#1f4e79", "center", 600);
+  } else if (level.type === "ring-apogee"){
+    const p = toXY(Math.PI, level.targetR);
+    drawTarget(g, V, p, level.tol, c);
+    const [X, Y] = V.px(...p);
+    if (!opts.noLabels) label(g, c, "Ziel: 2000 km Höhe (r_A = 8371 km)", X, Y + 28 * f, "#1f4e79", "center", 600);
+  } else if (level.type === "threshold-orbit" && !opts.noLabels){
+    // Radius r0 einzeichnen
+    const [X0, Y0] = V.px(0, 0), [X1, Y1] = V.px(R_LAUNCH * Math.sin(-0.6), R_LAUNCH * Math.cos(-0.6));
+    g.setLineDash([6 * f, 5 * f]); g.strokeStyle = "#6b665e"; g.lineWidth = 1.5 * f;
+    g.beginPath(); g.moveTo(X0, Y0); g.lineTo(X1, Y1); g.stroke(); g.setLineDash([]);
+    label(g, c, "r₀ = 6571 km", (X0 + X1) / 2 - 8 * f, (Y0 + Y1) / 2, "#4a4640", "right");
+  }
+
+  // frühere Bahnen (grau)
+  (opts.ghosts || []).forEach(sh => drawPath(g, V, sh.pts, "#a9a39a", 1.5 * f, sh.v, c));
+  // aktuelle Bahn
+  if (opts.trail && opts.trail.length){
+    drawPath(g, V, opts.trail, "#b5452f", 3 * f);
+    const [px_, py_] = V.px(...opts.trail[opts.trail.length - 1]);
+    g.beginPath(); g.arc(px_, py_, 7 * f, 0, 2 * Math.PI); g.fillStyle = "#b5452f"; g.fill();
+  }
+  // grosse Achse der letzten Ellipse
+  if (opts.axisFor && outcome(opts.axisFor) === "Umlaufbahn" && !opts.noLabels){
+    const d = orbitData(opts.axisFor);
+    const [X1, Y1] = V.px(0, R_LAUNCH), [X2, Y2] = V.px(0, -rOfTheta(Math.PI, opts.axisFor));
+    g.setLineDash([3 * f, 4 * f]); g.strokeStyle = "#b5452f"; g.lineWidth = 1.5 * f;
+    g.beginPath(); g.moveTo(X1, Y1); g.lineTo(X2, Y2); g.stroke(); g.setLineDash([]);
+    label(g, c, `2a = ${fmtKm(2 * d.a)}`, X1 + 10 * f, (Y1 + Y2) / 2, "#b5452f", "left", 600);
+  }
+  return V;
+}
+
+function drawTarget(g, V, [x, y], tol, c){
+  const [X, Y] = V.px(x, y);
+  const rr = Math.max(tol * V.s, 14 * F(c));
+  [1, 0.62, 0.25].forEach((fct, i) => {
+    g.beginPath(); g.arc(X, Y, rr * fct, 0, 2 * Math.PI);
+    g.fillStyle = i % 2 ? "#ffffff" : "rgba(31,78,121,.85)"; g.fill();
+  });
+}
+
+function labelPoint(pts, v){
+  const o = outcome(v);
+  if (o === "Umlaufbahn") return pts[Math.floor((pts.length - 1) / 2)];
+  if (o === "Fluchtbahn") return pts[Math.floor((pts.length - 1) * 0.2)];
+  return pts[pts.length - 1];
+}
+
+function drawPath(g, V, pts, color, lw, v, c){
+  if (!pts.length) return;
+  g.beginPath();
+  pts.forEach(([x, y], i) => { const [X, Y] = V.px(x, y); i ? g.lineTo(X, Y) : g.moveTo(X, Y); });
+  g.strokeStyle = color; g.lineWidth = lw; g.lineJoin = "round"; g.stroke();
+  if (v !== undefined && c){
+    const [X, Y] = V.px(...labelPoint(pts, v));
+    label(g, c, `${(v / KM).toFixed(2)} km/s`, X + 8 * F(c), Y - 12 * F(c), "#6b665e");
+  }
+}
+
+/* ============================================================
+   UI
+   ============================================================ */
+const $ = id => document.getElementById(id);
+const vRange = $("vRange"), vNum = $("vNum");
+function level(){ return LEVELS[state.li]; }
+
+function buildLevelDots(){
+  $("levelDots").innerHTML = LEVELS.map((L, i) =>
+    `<span class="lv ${state.finished || i < state.li ? "done" : i === state.li ? "on" : ""}">Level ${L.id}</span>`).join("");
+}
+
+function setupLevel(){
+  const L = level();
+  state.shots = []; state.prediction = null; state.tips = 0; state.predOK = 0;
+  buildLevelDots();
+  $("lvTitle").textContent = `Level ${L.id}: ${L.name}`;
+  $("lvMission").textContent = L.mission;
+  $("play").hidden = false; $("reflect").hidden = true;
+  $("answer").value = "";
+  vRange.min = vNum.min = L.vmin; vRange.max = vNum.max = L.vmax;
+  vRange.step = vNum.step = L.step;
+  const start = L.vmin + (L.vmax - L.vmin) * 0.3;
+  vRange.value = vNum.value = start.toFixed(2);
+  buildTool(); buildPredict(); updateSpeedInfo(); renderShots();
+  $("history").innerHTML = "";
+  setFeedback("Rechne zuerst und mach dann deine Vorhersage.");
+  $("viewInfo").textContent = `Bildbreite ${fmtKm(L.view.w)}`;
+  $("timeInfo").textContent = `Zeitraffer ×${L.timeScale * SPEEDUP}`;
+  redraw();
+}
+
+function buildTool(){
+  const L = level();
+  $("toolBox").innerHTML = `
+    <dl>${L.given.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}<dt>Gesucht</dt><dd><b>${L.wanted}</b></dd></dl>
+    <div class="tips">${L.tips.map((_, i) => `<button class="small" data-tip="${i}">Tipp ${i + 1}</button>`).join("")}</div>
+    ${L.tips.map((t, i) => `<div class="tiptext" id="tip${i}">${t}</div>`).join("")}`;
+  $("toolBox").querySelectorAll("button[data-tip]").forEach(b => b.onclick = () => {
+    const i = +b.dataset.tip;
+    for (let j = 0; j <= i; j++){
+      $("tip" + j).style.display = "block";
+      $("toolBox").querySelector(`button[data-tip="${j}"]`).classList.add("used");
+    }
+    state.tips = Math.max(state.tips, i + 1);
+  });
+}
+
+function buildPredict(){
+  const L = level(), box = $("predictBox");
+  box.innerHTML = `<p class="hint" style="margin:0 0 6px">Was wird mit deiner Geschwindigkeit passieren?</p>
+    <div class="predict">${L.predict.map(o => `<button data-o="${o}">${o}</button>`).join("")}</div>`;
+  box.querySelectorAll("button").forEach(b => b.onclick = () => {
+    state.prediction = b.dataset.o;
+    box.querySelectorAll("button").forEach(x => x.classList.toggle("sel", x === b));
+    updateFire();
+  });
+}
+
+function updateSpeedInfo(){
+  const v = parseFloat(vNum.value) * KM;
+  $("mach").textContent = isFinite(v) ? `≈ ${(v * 3.6).toLocaleString("de-CH", {maximumFractionDigits: 0})} km/h · Mach ${(v / V_SOUND).toFixed(1)}` : "";
+  $("scale").innerHTML = scaleSVG(v);
+}
+vRange.addEventListener("input", () => { vNum.value = parseFloat(vRange.value).toFixed(2); updateSpeedInfo(); });
+vNum.addEventListener("input", () => {
+  const L = level(); let v = parseFloat(vNum.value);
+  if (isFinite(v)){ v = Math.min(L.vmax, Math.max(L.vmin, v)); vRange.value = v; }
+  updateSpeedInfo();
+});
+vNum.addEventListener("change", () => {
+  const L = level(); let v = parseFloat(vNum.value);
+  if (!isFinite(v)) v = L.vmin;
+  v = Math.min(L.vmax, Math.max(L.vmin, v));
+  vNum.value = v.toFixed(2); vRange.value = v; updateSpeedInfo();
+});
+
+function updateFire(){
+  const can = !!state.prediction && !state.anim && state.shots.length < SHOTS_PER_LEVEL;
+  $("fireBtn").disabled = !can;
+  if (can) setFeedback("Vorhersage gespeichert. Stelle die Geschwindigkeit ein und feuere!");
+}
+function renderShots(){
+  $("shots").innerHTML = Array.from({length: SHOTS_PER_LEVEL}, (_, i) =>
+    `<span class="shot ${i < state.shots.length ? "used" : ""}"></span>`).join("");
+}
+function setFeedback(html, cls = ""){ const f = $("feedback"); f.innerHTML = html; f.className = cls; }
+
+/* ============================================================
+   SCHUSS + ANIMATION
+   ============================================================ */
+$("fireBtn").onclick = () => {
+  const v = parseFloat(vNum.value) * KM;
+  if (!isFinite(v) || v <= 0){ setFeedback("Wähle eine Geschwindigkeit grösser als null.", "bad"); return; }
+  startAnimation(v);
+};
+
+function startAnimation(v0){
+  state.anim = { v0, theta: 0, thEnd: thetaMax(v0), trail: [toXY(0, R_LAUNCH)], last: null };
+  $("fireBtn").disabled = true;
+  setFeedback("Die Kugel fliegt …");
+  requestAnimationFrame(tick);
+}
+
+function tick(ts){
+  const a = state.anim, L = level();
+  if (!a) return;
+  if (a.last === null) a.last = ts;
+  const realDt = Math.min(0.05, (ts - a.last) / 1000); a.last = ts;
+  const simDt = realDt * L.timeScale * SPEEDUP, nSub = 60, sub = simDt / nSub;
+  for (let i = 0; i < nSub && a.theta < a.thEnd; i++) a.theta = Math.min(a.thEnd, thetaStep(a.theta, a.v0, sub));
+  const r = rOfTheta(a.theta, a.v0);
+  a.trail.push(toXY(a.theta, r));
+  drawScene(cv, ctx, L, { ghosts: state.shots, trail: a.trail });
+  const [px, py] = a.trail[a.trail.length - 1], vw = L.view.w * 0.55;
+  const outOfView = Math.abs(px - L.view.cx) > vw || Math.abs(py - L.view.cy) > vw;
+  if (a.theta >= a.thEnd || outOfView || !isFinite(r)) finishShot();
+  else requestAnimationFrame(tick);
+}
+
+function measure(v){
+  const o = outcome(v);
+  if (o === "Absturz") return `Landung nach ${fmtKm(R_EARTH * thetaImpact(v))}`;
+  if (o === "Umlaufbahn"){
+    const d = orbitData(v);
+    return `Perigäum ${fmtKm(d.rP - R_EARTH)} hoch, Apogäum ${fmtKm(d.rA - R_EARTH)} hoch, a = ${fmtKm(d.a)}, e = ${d.e.toFixed(3)}`;
+  }
+  return `offene Bahn, e = ${(lam(v) - 1).toFixed(2)}`;
+}
+
+function finishShot(){
+  const a = state.anim, L = level();
+  state.anim = null;
+  const v0 = a.v0, out = outcome(v0);
+  const shot = { v: v0, out, pts: samplePath(v0) };
+  const verdict = judge(L, shot);
+  shot.verdict = verdict;
+  state.shots.push(shot);
+  renderShots();
+
+  if (state.prediction === verdict.key) state.predOK++;
+  const predTxt = state.prediction === verdict.key ? " Deine Vorhersage stimmte."
+                                                   : ` Du hattest «${state.prediction}» erwartet.`;
+  $("history").insertAdjacentHTML("beforeend", `<li><b>${(v0 / KM).toFixed(2)} km/s</b>: ${verdict.key}. ${measure(v0)}</li>`);
+  setFeedback(`<b>${verdict.title}</b> ${verdict.text}${predTxt}`, verdict.hit ? "ok" : verdict.good === false ? "bad" : "");
+  state.prediction = null;
+  $("predictBox").querySelectorAll("button").forEach(x => x.classList.remove("sel"));
+  drawScene(cv, ctx, L, { ghosts: state.shots, axisFor: v0 });
+
+  const levelOver = verdict.hit || state.shots.length >= SHOTS_PER_LEVEL;
+  if (levelOver) setTimeout(endLevel, 900);
+  else { $("fireBtn").disabled = true; }
+}
+
+/* Bewertung eines Schusses; key = Kategorie wie bei der Vorhersage */
+function judge(L, shot){
+  const v = shot.v;
+  if (L.type === "ring-ground"){
+    const th = thetaImpact(v);
+    if (th === null) return { key: "zu weit", title: "Viel zu schnell!", text: "Die Kugel landet gar nicht mehr.", good: false };
+    const s = R_EARTH * th, d = s - L.targetS;
+    if (Math.abs(d) <= L.tol) return { key: "Treffer", title: "Treffer!", text: `Landung nach ${fmtKm(s)}.`, hit: true };
+    return { key: d < 0 ? "zu kurz" : "zu weit", title: d < 0 ? "Zu kurz." : "Zu weit.",
+             text: `Landung nach ${fmtKm(s)}, das Ziel liegt bei 200 km.`, good: false };
+  }
+  if (L.type === "ring-apogee"){
+    if (shot.out === "Absturz") return { key: "zu tief", title: "Absturz.", text: "Die Kugel kommt nicht um die Erde herum.", good: false };
+    if (shot.out === "Fluchtbahn") return { key: "zu hoch", title: "Weg ist sie!", text: "Die Kugel kommt nicht mehr zurück.", good: false };
+    const rf = rOfTheta(Math.PI, v), d = rf - L.targetR;
+    if (Math.abs(d) <= L.tol) return { key: "Treffer", title: "Treffer!", text: `Apogäum ${fmtKm(rf - R_EARTH)} über dem Boden.`, hit: true };
+    return { key: d < 0 ? "zu tief" : "zu hoch", title: d < 0 ? "Zu tief." : "Zu hoch.",
+             text: `Apogäum ${fmtKm(rf - R_EARTH)} über dem Boden, das Ziel liegt bei 2000 km.`, good: false };
+  }
+  if (L.type === "threshold-orbit"){
+    if (shot.out === "Absturz") return { key: "Absturz", title: "Absturz.", text: "Die Kugel landet wieder auf der Erde.", good: false };
+    if (shot.out === "Fluchtbahn") return { key: "Fluchtbahn", title: "Zu schnell!", text: "Die Kugel verlässt die Erde ganz.", good: false };
+    const d = orbitData(v);
+    const circ = d.e < 0.01;
+    return { key: "Umlaufbahn", title: circ ? "Kreisbahn!" : "Umlaufbahn, aber kein Kreis.",
+             text: circ ? "Die Kugel fliegt in gleicher Höhe um die Erde." : `Die Bahn ist eine Ellipse (e = ${d.e.toFixed(3)}).`, good: true, hit: circ };
+  }
+  if (L.type === "threshold-escape"){
+    if (shot.out === "Fluchtbahn"){
+      const close = v - V_ESC <= 50;
+      return { key: "Fluchtbahn", title: "Fluchtbahn!", text: close ? "Die Kugel kommt nie mehr zurück, und schneller als nötig war sie kaum."
+                                                                   : "Die Kugel kommt nie mehr zurück. Geht es auch mit weniger Geschwindigkeit?", good: true, hit: close };
+    }
+    return { key: shot.out, title: "Sie kommt zurück.", text: "Die Kugel bleibt auf einer geschlossenen Bahn um die Erde.", good: false };
+  }
+}
+
+function endLevel(){
+  const L = level();
+  let html = "", rec = null;
+  let stars = 0;
+  if (L.type.startsWith("ring")){
+    const hit = state.shots.find(s => s.verdict.hit);
+    rec = hit || closestShot(L);
+    const miss = ringMiss(L, rec);
+    stars = hit ? 3 : miss <= 2 * L.tol ? 2 : miss <= 4 * L.tol ? 1 : 0;
+    html = `<div class="stars">${"★".repeat(stars)}${"☆".repeat(3 - stars)}</div>` +
+           (hit ? `<p style="margin:0">Treffer mit ${(hit.v / KM).toFixed(2)} km/s.</p>` : `<p style="margin:0">Kein Treffer. Dein bester Schuss: ${(rec.v / KM).toFixed(2)} km/s.</p>`);
+  } else {
+    const want = L.type === "threshold-orbit" ? "Umlaufbahn" : "Fluchtbahn";
+    const good = state.shots.filter(s => s.out === want);
+    rec = good.sort((a, b) => Math.abs(a.v - L.correct) - Math.abs(b.v - L.correct))[0] || state.shots[state.shots.length - 1];
+    if (good.length){
+      const d = Math.abs(rec.v - L.correct) / KM;
+      stars = d <= 0.05 ? 3 : d <= 0.15 ? 2 : d <= 0.3 ? 1 : 0;
+      html = `<div class="stars">${"★".repeat(stars)}${"☆".repeat(3 - stars)}</div>
+              <p style="margin:0">Dein bester Schuss: ${(rec.v / KM).toFixed(2)} km/s.</p>`;
+    } else html = `<p style="margin:0">Du hast keine ${want} erreicht.</p>`;
+  }
+  html += `<p class="hint" style="margin:6px 0 0">Richtiger Wert: ${(L.correct / KM).toFixed(2)} km/s.</p>`;
+  const hitIdx = state.shots.findIndex(s => s.verdict.hit);
+  const st = { stars, hitIdx, tips: state.tips, predOK: state.predOK, nShots: state.shots.length };
+  st.points = levelPoints(st);
+  state.stats[state.li] = st;
+  html += `<div class="pts">Punkte in diesem Level: <b>${st.points}</b> von ${levelMax()}
+    (Ergebnis ${stars * PTS.star}, schneller Treffer ${hitIdx >= 0 ? PTS.eff[hitIdx] : 0},
+    Vorhersagen ${predPoints(st)}, Tipps −${PTS.tip[st.tips]})</div>`;
+  state.records[state.li] = { v: rec.v, out: rec.out, pts: rec.pts };
+  $("result").innerHTML = html;
+  $("question").textContent = L.question;
+  $("play").hidden = true; $("reflect").hidden = false;
+}
+
+function ringMiss(L, s){
+  if (L.type === "ring-ground"){ const th = thetaImpact(s.v); return th === null ? Infinity : Math.abs(R_EARTH * th - L.targetS); }
+  if (s.out !== "Umlaufbahn") return Infinity;
+  return Math.abs(rOfTheta(Math.PI, s.v) - L.targetR);
+}
+function levelPoints(st){
+  const p = st.stars * PTS.star + (st.hitIdx >= 0 ? PTS.eff[st.hitIdx] : 0) + predPoints(st) - PTS.tip[st.tips];
+  return Math.max(0, p);
+}
+function predPoints(st){ return st.nShots ? Math.round(PTS.predMax * st.predOK / st.nShots) : 0; }
+function levelMax(){ return 3 * PTS.star + PTS.eff[0] + PTS.predMax; }
+
+function closestShot(L){
+  const score = s => {
+    if (L.type === "ring-ground"){ const th = thetaImpact(s.v); return th === null ? Infinity : Math.abs(R_EARTH * th - L.targetS); }
+    if (s.out !== "Umlaufbahn") return Infinity;
+    return Math.abs(rOfTheta(Math.PI, s.v) - L.targetR);
+  };
+  return state.shots.slice().sort((a, b) => score(a) - score(b))[0];
+}
+
+$("nextBtn").onclick = () => {
+  state.answers[state.li] = $("answer").value.trim();
+  if (state.li < LEVELS.length - 1){ state.li++; setupLevel(); }
+  else showSummary();
+};
+
+function redraw(){
+  if (state.finished) return;
+  drawScene(cv, ctx, level(), { ghosts: state.shots });
+}
+
+/* ============================================================
+   AUSWERTUNG
+   ============================================================ */
+const CONICS = ["Kreis", "Ellipse", "Parabel", "Hyperbel"];
+function correctConic(v){
+  const L = lam(v);
+  if (L < 1 && thetaImpact(v) !== null) return { ok: ["Ellipse", "Parabel"], note: "Streng genommen ein Ellipsenstück; in Bodennähe ist die Parabel eine sehr gute Näherung." };
+  if (Math.abs(L - 1) < 0.02) return { ok: ["Kreis", "Ellipse"], note: "Fast ein Kreis: genau ein Kreis wäre es bei 7.79 km/s." };
+  if (L < 2) return { ok: ["Ellipse"], note: "" };
+  if (Math.abs(L - 2) < 0.02) return { ok: ["Parabel", "Hyperbel"], note: "Fast genau die Fluchtgeschwindigkeit: dort ist die Bahn eine Parabel." };
+  return { ok: ["Hyperbel"], note: "" };
+}
+function correctClosed(v){ return outcome(v) === "Umlaufbahn" ? "ja" : "nein"; }
+
+function showSummary(){
+  state.finished = true;
+  $("game").hidden = true; $("summary").hidden = false;
+  buildLevelDots();
+  const c = $("cvSum"), g = c.getContext("2d");
+  fitCanvas(c);
+  const V = drawScene(c, g, { type: "none", view: { cx: 0.6 * R_EARTH, cy: -0.4 * R_EARTH, w: 4.6 * R_EARTH } }, { noLabels: true });
+  const colors = ["#6b665e", "#1f4e79", "#2f7d32", "#b5452f"];
+  state.records.forEach((rec, i) => {
+    if (!rec) return;
+    drawPath(g, V, rec.pts, colors[i], 3 * F(c));
+    const p = labelPoint(rec.pts, rec.v);
+    const [X, Y] = V.px(...p);
+    label(g, c, `${(rec.v / KM).toFixed(2)} km/s`, X + 8 * F(c), Y + (rec.out === "Umlaufbahn" ? 24 : -14) * F(c), colors[i], "left", 600);
+  });
+
+  const rows = state.records.map((rec, i) => `
+    <tr data-i="${i}">
+      <td>Level ${i + 1}</td><td>${(rec.v / KM).toFixed(2)} km/s</td>
+      <td><select class="c-out" aria-label="Ergebnis Level ${i + 1}"><option value="">wählen</option>${["Absturz", "Umlaufbahn", "Fluchtbahn"].map(o => `<option>${o}</option>`).join("")}</select></td>
+      <td><select class="c-con" aria-label="Kegelschnitt Level ${i + 1}"><option value="">wählen</option>${CONICS.map(o => `<option>${o}</option>`).join("")}</select></td>
+      <td><select class="c-cl" aria-label="geschlossene Bahn Level ${i + 1}"><option value="">wählen</option><option>ja</option><option>nein</option></select></td>
+    </tr>`).join("");
+  $("sumTable").innerHTML = `<tr><th>Bahn</th><th>Abschussgeschwindigkeit</th><th>Ergebnis</th><th>Kegelschnitt</th><th>geschlossene Bahn?</th></tr>${rows}`;
+
+  const items = LEVELS.map((L, i) => ({ k: i, q: `Level ${L.id}: ${L.question}`, mine: state.answers[i], model: L.model }));
+  items.push({ k: LEVELS.length, q: FINAL_Q, mine: null, model: FINAL_MODEL, final: true });
+  $("answers").innerHTML = items.map(it => `
+    <div class="ans"><div class="q">${it.q}</div>
+      ${it.final ? `<textarea placeholder="Deine Antwort"></textarea>` : `<div class="mine">Deine Antwort: ${it.mine ? escapeHtml(it.mine) : "<i>keine</i>"}</div>`}
+      <div class="model"><b>Musterlösung:</b> ${it.model}</div>
+      <div class="selfrate" data-k="${it.k}"><span class="hint">Meine Antwort war:</span>
+        ${["richtig", "teilweise", "falsch"].map(r => `<button class="small" data-r="${r}">${r}</button>`).join("")}</div></div>`).join("");
+  $("answers").querySelectorAll(".selfrate").forEach(box => box.querySelectorAll("button").forEach(b => b.onclick = () => {
+    state.selfRates[+box.dataset.k] = b.dataset.r;
+    box.querySelectorAll("button").forEach(x => x.classList.toggle("sel", x === b));
+    renderScore();
+  }));
+  renderScore();
+}
+
+function renderScore(){
+  const lvl = state.stats.reduce((a, s) => a + (s ? s.points : 0), 0);
+  const lvlMax = LEVELS.length * levelMax();
+  const nCells = state.records.length * 3;
+  const tab = state.tableRight * PTS.cell, tabMax = nCells * PTS.cell;
+  const nQ = LEVELS.length + 1;
+  const self = state.selfRates.reduce((a, r) => a + (r ? PTS.self[r] : 0), 0), selfMax = nQ * PTS.self.richtig;
+  const raw = lvl + tab + self, max = lvlMax + tabMax + selfMax;
+  const score = Math.round(100 * raw / max);
+  const title = score >= 90 ? "Newton wäre stolz auf dich!" : score >= 75 ? "Sehr gut: Du hast die Bahnen im Griff." :
+                score >= 50 ? "Gut gemacht, mit etwas Übung wird es noch besser." : "Ein Anfang: Schau dir die Musterlösungen genau an.";
+  const tipsUsed = state.stats.reduce((a, s) => a + (s ? s.tips : 0), 0);
+  $("scoreCard").innerHTML = `
+    <div class="step" style="margin-top:0">Dein Punktestand</div>
+    <div class="big">${score} / 100</div>
+    <p style="margin:2px 0 8px">${title}</p>
+    <div class="tablewrap"><table>
+      <tr><th>Teil</th><th>Punkte</th></tr>
+      ${LEVELS.map((L, i) => `<tr><td>Level ${L.id}: ${L.name}</td><td>${state.stats[i] ? state.stats[i].points : 0} / ${levelMax()}</td></tr>`).join("")}
+      <tr><td>Tabelle der Bahnen${state.tableChecked ? "" : " (noch nicht geprüft)"}</td><td>${tab} / ${tabMax}</td></tr>
+      <tr><td>Antworten (Selbstbewertung)${state.selfRates.filter(Boolean).length < nQ ? " (noch nicht vollständig)" : ""}</td><td>${self} / ${selfMax}</td></tr>
+      <tr><th>Total</th><th>${raw} / ${max}</th></tr>
+    </table></div>
+    <p class="hint" style="margin:6px 0 0">Pro Level: 10 Punkte pro Stern, Bonus für einen schnellen Treffer (10 beim ersten, 5 beim zweiten Schuss), bis 6 für richtige Vorhersagen (Anteil der richtigen); Tipp 1 kostet 3, Tipp 2 insgesamt 10 Punkte. Du hast ${tipsUsed === 0 ? "keine Tipps" : tipsUsed + " Tipp-Stufen"} benutzt.</p>`;
+}
+function escapeHtml(s){ return s.replace(/[&<>"]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch])); }
+
+$("showModel").onclick = () => {
+  document.querySelectorAll(".ans .model").forEach(m => m.style.display = "block");
+  document.querySelectorAll(".ans .selfrate").forEach(m => m.style.display = "flex");
+  $("showModel").disabled = true;
+};
+
+$("checkBtn").onclick = () => {
+  let right = 0, total = 0; const notes = [];
+  $("sumTable").querySelectorAll("tr[data-i]").forEach(tr => {
+    const rec = state.records[+tr.dataset.i];
+    [[".c-out", v => v === outcome(rec.v)], [".c-con", v => correctConic(rec.v).ok.includes(v)], [".c-cl", v => v === correctClosed(rec.v)]]
+      .forEach(([sel, test]) => {
+        const el = tr.querySelector(sel); total++;
+        const ok = el.value !== "" && test(el.value);
+        if (ok) right++;
+        el.parentElement.className = el.value === "" ? "" : ok ? "r" : "w";
+      });
+    const n = correctConic(rec.v).note; if (n) notes.push(`Level ${+tr.dataset.i + 1}: ${n}`);
+  });
+  $("checkMsg").innerHTML = `${right} von ${total} richtig.${notes.length ? "<br>" + notes.join("<br>") : ""}`;
+  state.tableRight = right; state.tableChecked = true;
+  renderScore();
+};
+
+/* ============================================================
+   REFERENZSKALA (logarithmisch, 10 m/s bis 50 km/s)
+   ============================================================ */
+const ICONS = {
+  car: '<path d="M-9 2h18v4h-18zM-6 2l3-5h7l3 5" fill="none" stroke="#232323" stroke-width="1.6"/><circle cx="-5" cy="7" r="2"/><circle cx="5" cy="7" r="2"/>',
+  plane: '<path d="M-10 1h20M2 1l-5-7M2 1l-5 7M-9 1l-2-4M-9 1l-2 4" fill="none" stroke="#232323" stroke-width="1.8" stroke-linecap="round"/>',
+  sound: '<circle cx="-6" cy="0" r="2.2"/><path d="M-2-5a7 7 0 0 1 0 10M2-8a11 11 0 0 1 0 16M6-11a15 15 0 0 1 0 22" fill="none" stroke="#232323" stroke-width="1.6"/>',
+  bullet: '<path d="M-9-3h12a6 3 0 0 1 0 6h-12z" fill="#8a8278" stroke="#232323" stroke-width="1.2"/>',
+  iss: '<rect x="-3" y="-3" width="6" height="6" fill="#232323"/><rect x="-12" y="-6" width="7" height="12" fill="none" stroke="#232323" stroke-width="1.4"/><rect x="5" y="-6" width="7" height="12" fill="none" stroke="#232323" stroke-width="1.4"/>',
+  sun: '<circle r="4" fill="#d39a1c"/><circle r="9" fill="none" stroke="#232323" stroke-width="1" stroke-dasharray="2 2"/><circle cx="9" r="2.2" fill="#1f4e79"/>'
+};
+function scaleSVG(v){
+  const W = 420, H = 112, pad = 20, lo = 1, hi = Math.log10(5e4);
+  const X = val => pad + (Math.log10(val) - lo) / (hi - lo) * (W - 2 * pad);
+  let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Geschwindigkeitsskala">`;
+  s += `<line x1="${pad}" y1="58" x2="${W - pad}" y2="58" stroke="#d9d4ca" stroke-width="2"/>`;
+  [10, 100, 1000, 10000].forEach(t => {
+    s += `<line x1="${X(t)}" y1="54" x2="${X(t)}" y2="62" stroke="#6b665e"/>`;
+    s += `<text x="${X(t)}" y="71" font-size="9" text-anchor="middle" fill="#6b665e">${t >= 1000 ? t / 1000 + " km/s" : t + " m/s"}</text>`;
+  });
+  REFS.forEach((r, i) => {
+    const x = X(r.v), up = i % 2 === 0;
+    s += `<g transform="translate(${x},${up ? 26 : 90})" fill="#232323">${ICONS[r.icon]}</g>`;
+    s += up ? `<line x1="${x}" y1="38" x2="${x}" y2="58" stroke="#a9a39a" stroke-dasharray="2 2"/>`
+            : `<line x1="${x}" y1="58" x2="${x}" y2="78" stroke="#a9a39a" stroke-dasharray="2 2"/>`;
+    s += `<text x="${x}" y="${up ? 9 : 111}" font-size="9" text-anchor="middle" fill="#6b665e">${r.label}</text>`;
+  });
+  if (isFinite(v) && v > 0){
+    const x = Math.min(W - pad, Math.max(pad, X(Math.max(v, 10))));
+    s += `<path d="M${x} 50 l-6 -9 h12 z" fill="#b5452f"/><line x1="${x}" y1="50" x2="${x}" y2="64" stroke="#b5452f" stroke-width="2.5"/>`;
+  }
+  return s + "</svg>";
+}
+
+/* ============================================================
+   SELBSTTEST gegen die Kontrollwerte aus cannone.py (H_MOUNTAIN = 200 km)
+   ============================================================ */
+function selfTest(){
+  const tests = [
+    ["v_circ [m/s]", V_CIRC, 7788.5, 0.05],
+    ["v_esc [m/s]", V_ESC, 11014.6, 0.05],
+    ["Reichweite 968.2 m/s [km]", R_EARTH * thetaImpact(968.2) / KM, 200.0, 0.05],
+    ["r(180°) 8244.3 m/s [km]", rOfTheta(Math.PI, 8244.3) / KM, 8371.0, 0.5],
+    ["lambda v_esc", lam(V_ESC), 2, 1e-9]
+  ];
+  const rows = tests.map(([n, got, want, tol]) => ({ Test: n, JS: +got.toFixed(5), Python: want, OK: Math.abs(got - want) <= tol }));
+  console.table(rows);
+  if (rows.some(r => !r.OK)) console.warn("Selbsttest: Abweichung von cannone.py!");
+}
+
+/* ============================================================
+   START
+   ============================================================ */
+function newtonPlaceholder(){
+  $("newtonBox").textContent = "[Platz für Newtons Originalabbildung: Datei newton_kanone.png in denselben Ordner legen]";
+}
+const nImg = $("newtonImg");
+nImg.addEventListener("error", newtonPlaceholder);
+if (nImg.complete && nImg.naturalWidth === 0) newtonPlaceholder();
+
+function init(){ fitCanvas(cv); selfTest(); setupLevel(); }
+window.addEventListener("resize", () => { if (!state.anim && !state.finished){ fitCanvas(cv); redraw(); } });
+init();
+</script>
+</body>
+</html>
